@@ -1,6 +1,6 @@
 # benchmark-pelican
 
-> Can a model draw a pelican riding a bicycle? A repeatable SVG test.
+> Deterministic SVG spatial-reasoning benchmark for birds riding bicycles.
 
 Package: https://www.npmjs.com/package/benchmark-pelican
 Repository: https://github.com/pooriaarab/benchmark-pelican
@@ -13,6 +13,16 @@ The root exports `benchmark`, `run`, and `score`. `benchmark-pelican/api` export
 ## Commands
 
 The CLI supports list, show, run, score, card, provenance, index-entry, serve, and mcp. Use the mock provider for offline verification.
+
+## Data and grading
+
+Thirty single-answer tasks come from one canonical prompt and a seeded animal and bicycle grid. The grader rejects unsafe SVG, then scores geometry and coverage. It does not use a model judge.
+
+Public seed: 20261015. Hidden outputs must stay outside the package. Detailed rules ship in `docs/grading.md`.
+
+## Gallery
+
+Run `npm run gallery -- report.json` in the repository to write `artifacts/gallery.html`.
 
 ## Verification
 

@@ -30,6 +30,13 @@ for (const strategy of weakAnswers) {
 }
 const referenceScores = await Promise.all(tasks.map((task) => benchmark.score(task, { answer: String(task.expected) })));
 assert.ok(referenceScores.every(({ score }) => score >= 0.85), "every generated reference must score high");
+const unsafeAnswers = [
+  '<svg viewBox="0 0 100 100"><a href=javascript:alert(1)></a></svg>',
+  '<svg viewBox="0 0 100 100"><style>@import "https://bad.invalid/x"</style></svg>',
+  '<svg viewBox="0 0 100 100"><use href="#wheels"/></svg>',
+  '<svg viewBox="0 0 100 100"><animate attributeName="href" to="javascript:alert(1)"/></svg>',
+];
+for (const answer of unsafeAnswers) assert.equal((await benchmark.score(tasks[0], { answer })).score, 0, "unsafe SVG must score zero");
 
 const probe = createNetServer();
 await new Promise((resolve) => probe.listen(0, "127.0.0.1", resolve));

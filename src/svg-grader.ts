@@ -2,6 +2,7 @@ import type { TaskScore } from "benchmark-core";
 
 const LIMIT = 50 * 1024;
 const SHAPES = new Set(["circle", "ellipse", "line", "path", "polygon", "polyline", "rect"]);
+const SAFE_ELEMENTS = new Set(["svg", "g", "defs", "path", "circle", "ellipse", "line", "polygon", "polyline", "rect", "lineargradient", "radialgradient", "stop", "clippath"]);
 interface Element { name: string; attrs: Record<string, string>; numbers: number[]; }
 interface Bounds { minX: number; minY: number; maxX: number; maxY: number; }
 
@@ -62,7 +63,11 @@ function scan(svg: string): { elements: Element[]; canvas: Bounds } | string {
       if (stack.pop() !== name) return "SVG tags are unbalanced";
       continue;
     }
-    const attrs = attributes(tag[3] ?? "");
+    if (!SAFE_ELEMENTS.has(name)) return `element <${name}> is not allowed`;
+    const attributeSource = tag[3] ?? "";
+    const hrefs = [...attributeSource.matchAll(/\b(?:xlink:)?href\s*=\s*([^\s>]+)/gi)];
+    if (hrefs.some((match) => !/^(?:"#[^"]*"|'#[^']*')$/.test(match[1]!))) return "only quoted local fragment href values are allowed";
+    const attrs = attributes(attributeSource);
     if (Object.keys(attrs).some((key) => key.startsWith("on"))) return "event handlers are not allowed";
     const numericSource = attrs.d ?? attrs.points ?? "";
     const numbers = [...numericSource.matchAll(/-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/gi)].map((match) => Number(match[0]));

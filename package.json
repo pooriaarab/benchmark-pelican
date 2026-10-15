@@ -1,8 +1,8 @@
 {
   "name": "benchmark-pelican",
   "version": "0.1.0",
-  "description": "Can a model draw a pelican riding a bicycle? A repeatable SVG test.",
-  "keywords": ["ai-benchmark", "llm-evaluation", "model-evaluation", "evals", "grading", "openrouter", "openai", "mcp", "typescript", "agent-benchmark"],
+  "description": "Deterministic AI benchmark for SVG spatial reasoning: can a model draw a pelican riding a bicycle?",
+  "keywords": ["ai-benchmark", "llm-evaluation", "model-evaluation", "svg", "spatial-reasoning", "multimodal", "evals", "grading", "openrouter", "openai", "mcp", "typescript"],
   "homepage": "https://private-repo-337e.com/benchmarks/benchmark-pelican",
   "bugs": "https://github.com/pooriaarab/benchmark-pelican/issues",
   "repository": { "type": "git", "url": "git+https://github.com/pooriaarab/benchmark-pelican.git" },
@@ -14,11 +14,11 @@
     "./api": { "types": "./dist/api.d.ts", "import": "./dist/api.js" }
   },
   "bin": { "benchmark-pelican": "./dist/cli.js" },
-  "files": ["dist", "data", "README.md", "AGENTS.md", "llms.txt", "server.json", "LICENSE"],
+  "files": ["dist", "data", "docs", "scripts", "README.md", "AGENTS.md", "llms.txt", "server.json", "LICENSE"],
   "engines": { "node": ">=20" }, "sideEffects": false,
   "scripts": {
     "lint": "oxlint src scripts", "typecheck": "tsc --noEmit", "build": "tsup",
-    "provenance": "node scripts/provenance.mjs", "generate:tasks": "node scripts/gen-tasks.mjs",
+    "provenance": "node scripts/provenance.mjs", "generate:tasks": "node scripts/gen-tasks.mjs", "gallery": "node scripts/gallery.mjs",
     "e2e": "node scripts/e2e.mjs", "ci:local": "npm run lint && npm run typecheck && npm run build && npm run e2e"
   },
   "dependencies": { "@modelcontextprotocol/sdk": "^1.20.1", "benchmark-core": "^0.1.0" },

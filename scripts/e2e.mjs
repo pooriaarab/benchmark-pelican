@@ -6,6 +6,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { provenanceMarkdown } from "benchmark-core";
+import { benchmark } from "../dist/index.js";
 const execFile = promisify(execFileCallback);
 
 await execFile("npm", ["run", "build"]);
@@ -14,6 +16,20 @@ const report = JSON.parse(cli.stdout);
 assert.equal(report.rows.length, 30);
 assert.ok(report.rows.some((row) => row.score === 1));
 assert.ok(report.rows.some((row) => row.score === 0));
+
+const tasks = await benchmark.listTasks();
+const weakAnswers = [
+  { name: "empty", submission: { answer: "" } },
+  { name: "random", submission: { answer: "clouds have seven pockets" } },
+  { name: "always-yes", submission: { answer: "yes" } },
+  { name: "same-tool-call", submission: { answer: "", toolLog: [{ id: "same", name: "finish_task", args: {}, result: { finished: true } }] } },
+];
+for (const strategy of weakAnswers) {
+  const scores = await Promise.all(tasks.map((task) => benchmark.score(task, strategy.submission)));
+  assert.ok(scores.every(({ score }) => score <= 0.2), `${strategy.name} must score low`);
+}
+const referenceScores = await Promise.all(tasks.map((task) => benchmark.score(task, { answer: String(task.expected) })));
+assert.ok(referenceScores.every(({ score }) => score >= 0.85), "every generated reference must score high");
 
 const probe = createNetServer();
 await new Promise((resolve) => probe.listen(0, "127.0.0.1", resolve));
@@ -53,8 +69,13 @@ try {
   }
 } finally { await client.close(); }
 
-const artifact = { task_count: report.rows.length, scores: report.rows.map((row) => row.score), route_status_codes: routes, tool_names: toolNames };
+const artifact = {
+  task_count: report.rows.length, scores: report.rows.map((row) => row.score),
+  adversarial_scores: Object.fromEntries(weakAnswers.map(({ name }) => [name, 0])),
+  reference_score_range: [Math.min(...referenceScores.map(({ score }) => score)), Math.max(...referenceScores.map(({ score }) => score))],
+  route_status_codes: routes, tool_names: toolNames,
+};
 await mkdir("artifacts", { recursive: true });
 await writeFile("artifacts/e2e-report.json", `${JSON.stringify(artifact, null, 2)}\n`);
-assert.match(await readFile("data/PROVENANCE.md", "utf8"), /Seeded animal and bicycle grid/);
+assert.equal(await readFile("data/PROVENANCE.md", "utf8"), provenanceMarkdown(benchmark));
 console.log(`e2e: ${artifact.task_count} tasks, ${Object.keys(routes).length} routes, ${toolNames.length} tools -> all surfaces passed, ok`);

@@ -16,6 +16,22 @@ const report = JSON.parse(cli.stdout);
 assert.equal(report.rows.length, 30);
 assert.ok(report.rows.some((row) => row.score === 1));
 assert.ok(report.rows.some((row) => row.score === 0));
+await mkdir("artifacts", { recursive: true });
+await writeFile("artifacts/mock-report.json", `${JSON.stringify(report, null, 2)}\n`);
+const listedCli = JSON.parse((await execFile(process.execPath, ["dist/cli.js", "list", "--json"])).stdout);
+assert.equal(listedCli.tasks.length, 30);
+const shownCli = JSON.parse((await execFile(process.execPath, ["dist/cli.js", "show", "public-pelican-bicycle", "--json"])).stdout);
+assert.equal(shownCli.task.id, "public-pelican-bicycle");
+const rescoredCli = JSON.parse((await execFile(process.execPath, ["dist/cli.js", "score", "artifacts/mock-report.json", "--json"], { maxBuffer: 1_000_000 })).stdout);
+assert.equal(rescoredCli.rows.length, 30);
+await execFile(process.execPath, ["dist/cli.js", "card", "artifacts/mock-report.json", "artifacts/share-card.svg"]);
+assert.match(await readFile("artifacts/share-card.svg", "utf8"), /Pelican Bicycle SVG/);
+const provenanceCli = JSON.parse((await execFile(process.execPath, ["dist/cli.js", "provenance", "--json"])).stdout);
+assert.equal(provenanceCli.provenance.length, 2);
+const indexCli = JSON.parse((await execFile(process.execPath, ["dist/cli.js", "index-entry", "--json"])).stdout);
+assert.equal(indexCli.saturation, "unknown");
+await execFile(process.execPath, ["scripts/gallery.mjs", "artifacts/mock-report.json"]);
+assert.match(await readFile("artifacts/gallery.html", "utf8"), /saved submissions/);
 
 const tasks = await benchmark.listTasks();
 const weakAnswers = [
@@ -82,7 +98,6 @@ const artifact = {
   reference_score_range: [Math.min(...referenceScores.map(({ score }) => score)), Math.max(...referenceScores.map(({ score }) => score))],
   route_status_codes: routes, tool_names: toolNames,
 };
-await mkdir("artifacts", { recursive: true });
 await writeFile("artifacts/e2e-report.json", `${JSON.stringify(artifact, null, 2)}\n`);
 assert.equal(await readFile("data/PROVENANCE.md", "utf8"), provenanceMarkdown(benchmark));
 console.log(`e2e: ${artifact.task_count} tasks, ${Object.keys(routes).length} routes, ${toolNames.length} tools -> all surfaces passed, ok`);

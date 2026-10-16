@@ -232,4 +232,4 @@ const tasks = selected.map(({ animal, vehicle }, index) => {
 
 await mkdir(dirname(output), { recursive: true });
 await writeFile(output, `${tasks.map((task) => JSON.stringify(task)).join("\n")}\n`);
-console.log(`generated ${tasks.length} ${split} tasks with seed ${seed} at ${output}`);
+console.log(`generated ${tasks.length} ${split} tasks${split === "public" ? ` with seed ${seed}` : ""} at ${output}`);

@@ -1,6 +1,6 @@
 # Structural SVG grading
 
-The grader reads SVG text without a browser, renderer, network call, or model judge. Each task uses the same geometry checks. Labels, element IDs, and prose do not earn credit.
+The grader reads SVG text without a browser, renderer, network call, or model judge. Each task carries its own `metadata.requiredParts` list, so a memorised drawing cannot ace every task. Labels, element IDs, and prose do not earn credit.
 
 ## Failure modes considered before implementation
 
@@ -12,38 +12,95 @@ The grader reads SVG text without a browser, renderer, network call, or model ju
 6. Regex alone can accept unbalanced tags, several roots, or a fragment wrapped around an SVG.
 7. A huge or highly repetitive answer can waste memory and inflate an element-count signal.
 8. Fixed coordinates can reward only the committed reference size.
-9. Strict color names can miss equivalent orange and yellow hex or RGB values.
-10. Structural geometry can still mistake abstract shapes for a bird on a bicycle.
+9. Strict colour names can miss equivalent orange and yellow hex or RGB values, while loose hex matching counts cream and white as warm.
+10. One memorised drawing can answer every task unless scoring reads each task's required parts.
+11. Relative path commands can produce wrong bounds when coordinates are read as absolute pairs.
 
-The E2E gate submits empty text, random text, `yes`, and a repeated tool call. Each weak strategy must stay at or below 0.2. It also submits every generated reference drawing, which must score at least 0.85.
+The E2E gate runs empty, random, always-yes, always-refuse, same-tool-call, and abstract-shapes strategies over every task; each must stay at or below 0.2. Every generated reference drawing must score exactly 1.0 on its own task, on both splits. The real memorised-reference attack replays every task's reference against every other task: no pair may exceed 0.4, the mismatched mean stays at or below 0.3, and the best single memorised reference averages at most 0.4 across the suite. Honest formatting variants (fence, prose, prolog, comments, text elements, entities) must score high, and every checked part must be readable in the prompt text.
 
-## Checks and weights
+## Answer extraction
 
-Unsafe, oversized, or malformed input receives zero before weighted checks run.
-
-| Check | Weight | Evidence |
-| --- | ---: | --- |
-| SVG canvas | 0.10 | One `svg` root with positive dimensions or a positive `viewBox` |
-| Drawing complexity | 0.10 | 12 to 200 visible geometry elements |
-| Wheels | 0.20 | Two separated, similarly sized circles or ellipses in the lower region |
-| Frame | 0.14 | Stroked line or path geometry joining the area between the wheels |
-| Handlebars | 0.08 | A smaller stroked shape above a wheel near the frame |
-| Pedals | 0.08 | A small round hub between and above the wheel centers |
-| Bird body | 0.12 | A substantial round or elliptical body above the bicycle |
-| Beak | 0.12 | Orange or yellow filled geometry in the upper region |
-| Legs | 0.04 | Warm-colored stroked geometry spanning from body toward pedals |
-| Coverage | 0.02 | Non-background geometry covers a useful fraction of both axes |
-
-Scores are the sum of passed checks. Reasons name every passed and missed check. The grader does not use metadata labels as visual evidence.
+An honest reply is accepted even when it is not bare markup. The scanner takes the last fenced code block containing `<svg` when fences exist, then the span from the first `<svg` to the last `</svg>`. Prolog `<?xml ...?>` lines, `<!-- comments -->`, and `<!doctype>` declarations are stripped. The five XML entities and numeric character references are allowed; other entities are rejected.
 
 ## Safety and parsing
 
-The answer must stay below 50 KiB. The scanner rejects declarations, doctypes, entities, unbalanced tags, multiple roots, `script`, `foreignObject`, `image`, event attributes, CSS `url()`, and external `href` values.
+The answer must stay below 50 KiB. The scanner rejects `script`, `foreignObject`, `image`, `use`, `a`, and `animate` elements, event attributes, CSS `url()` values that are not local fragments, and non-fragment `href` values. Text content is only allowed inside `title`, `desc`, `text`, `tspan`, and `style` elements. A `style` element may only hold `.class { prop: value }` rules for paint properties (fill, stroke, stroke-width, dash pattern, line caps); any other CSS — at-rules, element or id selectors, urls — is rejected. Path bounds are computed by replaying `M L H V C S Q T A Z` commands, including relative forms.
 
-Coordinates are normalized against the declared canvas. This supports different SVG sizes. Path bounds are estimates from numeric coordinate pairs, so arc flags and relative commands can reduce accuracy.
+Fill and stroke are resolved the way a renderer would: inherited from ancestors (`<g fill="...">`), then the element's own presentation attribute, then matching `style` class rules, then inline `style="..."`. A shape with no fill anywhere paints its default black.
+
+## Measuring against the vehicle's own wheels
+
+The wheels are found first: the two circles that a frame line or path actually connects — a stroked line, path, or polyline whose bounds reach within half a wheel radius of both centres. The pair must be alike in size, roughly level, and clearly separated; a concentric outer ring hugging a wheel is a tyre ring, not a wheel, and a loose circle — a sun, a ball, a hub dot — is never a wheel because no frame reaches it. A drawing whose frame misses the hubs falls back to the lowest similar round pair so the reasons stay accurate.
+
+Every geometric check is then derived from the vehicle itself: the wheel radius R, the wheelbase WB between the axles, and the axle line axleY. No check reads the canvas, the `viewBox`, or the size of the whole drawing, so scaling, translating, or widening the canvas leaves every score unchanged. The E2E proves this by rescaling and shifting every reference drawing, and by widening the canvas to 1000, 1280, and 1600 with a full-width ground line, a ground band, or no ground — all scores identical.
+
+The figure is whatever touches the wheels, transitively, within a hairline pad for anti-aliasing gaps. Two kinds of decoration can never join: a background rectangle covering the canvas, and any long thin horizontal stroke or band wider than 1.35 wheelbases and under a fifth as tall as it is wide (a ground line, a horizon, a sky band). A detached shape — a sun, a cloud — that does not touch the figure cannot join either. One limit remains, measured: a shape that literally overlaps the figure counts as part of it. In a seeded sweep of 200 warm suns scattered over the reference drawings, 12 moved a score and every one of them touched the figure; no detached decoration ever did.
+
+Part checks see only the connected figure, with one deliberate exception: a beak is warm-coloured geometry that overlaps the head it hangs from, or a pouch — a second warm shape that starts under the head and hangs clearly below the head's centre line and below the beak's lower edge. Warm-coloured means a warm fill: a beak must be a filled shape, and a stroke-only orange curve is not read as a beak — a drawing whose only beak is an outline fails the gate and caps at "no bird with a beak". A warm dot at the beak's far edge or inside the beak's own bounds can neither be a pouch nor reclassify the beak.
+
+## Checks and scoring
+
+Unsafe, oversized, or malformed input receives zero before checks run. The score is multiplicative:
+
+```text
+score = sharedGate x taskFit
+taskFit = 0.4 ^ (missed required task-specific parts + unrequested task-specific parts drawn)
+```
+
+The shared gate holds the checks every task asks for: safe well-formed markup, two wheels, a bicycle frame, handlebars, pedals, a bird body, a bird head, a beak, legs reaching the pedals, and canvas coverage. The task fit holds the parts that change per task: the named animal's beak style, neck, body posture, legs and extras, and the named vehicle's handlebar style, wheel size, tire class, and extras. A memorised drawing of the wrong bird fails the specific checks instead of coasting on the shared ones, and a drawing that adds parts the task never asked for is penalised the same way.
+
+Each task's `metadata.requiredParts` lists the parts the prompt states; the generator asserts every checked part appears in the prompt text, and each prompt spells out what the grader measures in plain terms with the real numbers where a check needs one ("a straight orange or yellow beak at least 1.6 times as long as the head is wide", "a tire stroke at least 0.28 times the wheel radius thick — thicker counts too"). The E2E runs the builder's literal-number policy (`scripts/literal-policy.mjs` — the builder's smoke policy; not independent evidence): it parses the prompt text alone — never `task.expected` or `task.metadata` — and draws exactly the numbers the prompts state with a small seeded slack (a tail the prompt calls "taller than 0.4 times the wheel radius" is drawn 0.42-0.5R tall, pedals sit on the axle line, tire strokes sit just over their stated minimums), sharing no layout code, colours, or canvas with the task generator. The independent evidence comes from a reviewer's literal-number policy — reads only the prompt, legs ending 0.2 wheel radii above to 0.3 below the axle line, jittered body and handlebar proportions, tail fans 0.42-0.6 wheel radii tall, 30 runs per split at 1000x600 and 640x480 — which measured a mean of 0.992 with runs 0.980-1.000 and 29-30 of 30 tasks at 0.8 or above on the public split; 0.999 (0.980-1.000) and 29-30 on held-out seed 7; 0.998 (0.973-1.000) and 29-30 on seed 99; 0.983 (0.960-1.000) and 28-30 on seed 4242. Re-measured on 2026-10-16 after the beak and cargo-box fixes, the builder's policy scores a mean of 1.000 with all 30 runs at 1.0 on the same four splits. A tail sweep replaces each reference's own fan with a plain filled triangle 0.42R, 0.45R, 0.48R, 0.52R and 0.7R tall: all 25 tail tasks across the same four splits score exactly 1.0 at every height, so the stated 0.4R is the real threshold. Every generated reference scores exactly 1.0 on its own task across the 30 held-out seeds exercised. The E2E also keeps the builder's own tuned prompt-only policy (`scripts/prompt-policy.mjs`) as a smoke test only; it is not independent and is not cited as evidence. These are measured floors for literal policies, not a promise about every drawing: a part placed oddly or shaped outside its stated description can still miss its check. Each missed or improvised specific part costs a 0.4x multiplier. The E2E also replays every task's reference drawing on every other task in both splits, so the separation is measured rather than assumed.
+
+### Shared gate checks
+
+| Check | Weight | Evidence |
+| --- | ---: | --- |
+| svg canvas | 0.05 | One `svg` root with positive dimensions or a positive `viewBox` |
+| complexity | 0.08 | 8 to 200 shapes in the connected figure |
+| coverage | 0.02 | The drawing's own extent is non-degenerate: a landscape scene, not a thin strip |
+| two wheels | 0.15 | Two similar, roughly level, clearly separated circles or ellipses that a frame line or path reaches at both centres |
+| bicycle frame | 0.11 | Stroked geometry spanning the gap between the wheels, reaching above the axle line |
+| handlebars | 0.06 | Stroked geometry over the front wheel, in the band just above the axle line and no higher than about half a wheelbase above the axles; a warm-filled shape never counts (it is beak territory) |
+| pedals | 0.05 | A small shape (a crank hub or pedal) between the wheels, near axle height |
+| bird body | 0.12 | The largest substantial round or elliptical body above the axle line |
+| bird head | 0.07 | A smaller round above and ahead of the body |
+| beak | 0.10 | Warm-coloured geometry attached to the head: a filled shape; a stroke-only orange curve is not a beak |
+| legs reaching the pedals | 0.05 | Stroked geometry descending from the body region to the pedal zone |
+
+### Task-specific checks
+
+Each task requires its own subset, and a passing check the task did not request counts against the fit. Beak and handlebar styles are exclusive: the warm geometry near the head classifies into exactly one beak style, and the bar zone classifies into exactly one bar style, so a drawing can satisfy at most one of each.
+
+| Check | Evidence |
+| --- | --- |
+| beak styles | Exactly one, all measured against the head width D: pouch (a second warm shape hanging below), large (at least 1.2 D long and 0.35 D deep), long pointed (straight, at least 1.6 D), pointed (straight, 0.55-1.6 D), flat (straight, at least 4x wider than tall, at most 1.05 D), thin curved (curved downward, at least 0.85 D), tall colourful (at least 0.55 D deep), hooked (curved, under 0.85 D), short (straight, under 0.55 D) |
+| neck | `long neck` (a stroked bridge from body to head) or `short neck` |
+| body posture | `upright body` (at least as tall as wide) or `level body` |
+| long legs | A thin leg stroke leaving the body and dropping at least half a wheel radius below the wheel axles, as the prompt states |
+| tail feathers | Filled geometry taller than the stated two fifths of a wheel radius trailing just behind the body; a shape no taller than that same 0.4R within a wheel radius of the frame's top tube is seat hardware, never a tail |
+| bar styles | Exactly one of: drop handlebars (a single curved stroke whose own bounding box is taller than it is wide — a curl split across several paths does not count), swept handlebars (a curve sweeping back toward the rider), or plain handlebars |
+| wheel size | `small wheels` (each wheel radius under a seventh of the wheelbase) or `full-size wheels` |
+| tires | `knobby tires` (a tire stroke at least 0.28 times the wheel radius — no upper bound — a dashed tread line, or a second ring hugging the tire), `fat tires` (at least a third of the wheel radius), or `smooth tires`. A fat tire counts as a rugged tire too: when a task asks for knobby tires an extra-thick stroke is not an unrequested part |
+| extras | `second saddle` (a second small flat filled seat — ellipse, rect, or filled path — above the frame, between the wheels or over the rear wheel, narrower than a wheel and at most a third as tall as it is wide), `cargo box` (a boxy filled carrier over the front wheel, never warm-coloured — a warm shape there is beak territory — with its top within 2.5 wheel radii of the axle line), `rear rack` (a thin flat rect at least as wide as a wheel, right over the rear wheel), `battery pack` (a rect on the frame between the wheels, nearly as wide as a wheel and at least a third as tall as it is wide) |
+
+Warm colours mean orange through yellow hues only; cream and near-white fills do not count. Beak checks read only warm geometry that overlaps the head (or hangs below an attached beak), so a stray warm shape elsewhere — a sun, a label — neither passes as a beak nor reclassifies one. Two shape rules to know: a beak must be a filled shape — a stroke-only orange curve is not read as a beak (the gate fails and the score caps at "no bird with a beak"); and a drop handlebar curl is recognised only as a single curved path whose own bounding box is taller than it is wide.
+
+## Caps
+
+If a drawing shows no bicycle evidence (no wheel pair and no frame) or no bird evidence (no warm beak shape near a head or a body), the score caps at 0.2 regardless of part checks. A bicycle with no rider and a pile of abstract shapes both stop here.
+
+## Report breakdown
+
+`run` and `score` output includes `checkSummary` (pass rate per check across the report) and per-row `details` (each check's name, weight, and outcome). The same fields appear in the JSON report and in `POST /v1/score` responses.
 
 ## Known limits
 
-This grader measures structural plausibility, not visual truth. It cannot prove the species, posture, occlusion, or artistic quality. A carefully constructed abstract SVG can pass. A valid drawing made mostly with transforms, nested viewports, complex relative paths, or CSS can lose credit.
+This grader measures structural plausibility, not visual truth. It can claim that the parts each prompt names are present, shaped like the named part, and arranged plausibly; it cannot prove the species, posture, occlusion, or artistic quality. "Does it look like a pelican" belongs to the optional vision judge from the charter, which is not implemented in version 0.2.0 and stays off by default and unscored. A drawing of a different animal that happens to satisfy the same part list can still earn credit, and a valid drawing made mostly with transforms or nested viewports can lose credit. Arc bounds are approximated by their endpoints.
 
-The optional vision judge from the charter is not implemented in version 0.1.0. Structural and judged scores must remain separate if a later release adds it.
+Figure membership is bounding-box based, so a detached-looking shape can still join the figure through an empty corner of a member's bounds: in a sweep of loose circles the size of a wheel kept at least 25 px clear of the figure, 117 of 3,600 changed a score (3.3%), and a large circle above the axle line can read as the bird body.
+
+Several prompt numbers are looser than the thresholds the grader measures, so draw with a margin. A large beak asks for "at least a third" as deep as the head is wide, but the grader needs 0.35 or more — a beak 0.34 deep failed all 55 measured runs. A hooked beak asks for "shorter than the head is wide", but over 0.85 times the head width reads as a thin curved beak. A tall colourful beak asks for "more than half" the head width tall, but the grader needs 0.55, so 0.52 fails. A level body asks for "wider than tall", but a body taller than 0.9 of its width reads as upright.
+
+Beak depth is not stated in the prompts, only implied by style: a pointed beak 0.2 head-widths deep reads as flat, and a long pointed or thin curved beak 0.4 head-widths deep reads as large. A yellow body on a short-neck task, or any warm shape touching the head, can join the beak union and lower the score — 201 of 213 measured yellow-body drawings scored 0.16.
+
+Structural and judged scores must remain separate if a later release adds the judge.

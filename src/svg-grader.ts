@@ -365,7 +365,15 @@ function sceneChecks(scene: Scene) {
   // second hop is a pouch: warm geometry that hangs clearly below an attached
   // beak AND below the head's centre line, so a warm dot inside the beak's own
   // bounding box cannot turn the beak into a pouch.
-  const warms = scene.geometry.filter((item) => warm(item.element.paint.fill) && item.bounds.minY < axleY - R * 0.3 && span(item.bounds).w > R * 0.1);
+  // A beak is warm-coloured geometry: a filled shape, or a stroked curve with
+  // a stroke at least 0.06 wheel radii wide (a hairline orange outline is too
+  // thin to read as a beak). Both forms must still overlap the head they hang
+  // from, or hang below an attached beak as a pouch.
+  const warmPainted = (item: { element: Element }) => {
+    if (warm(item.element.paint.fill)) return true;
+    return warm(item.element.paint.stroke) && (number(item.element.paint["stroke-width"]) ?? 1) >= R * 0.06;
+  };
+  const warms = scene.geometry.filter((item) => warmPainted(item) && item.bounds.minY < axleY - R * 0.3 && span(item.bounds).w > R * 0.1);
   const headPad = head ? { minX: head.bounds.minX - head.rx * 0.2, minY: head.bounds.minY - head.rx * 0.2, maxX: head.bounds.maxX + head.rx * 0.2, maxY: head.bounds.maxY + head.rx * 0.2 } : undefined;
   const attached = head && headPad ? warms.filter((item) => overlap(item.bounds, headPad)) : [];
   // A pouch is a second warm shape that hangs clearly below the head's centre
@@ -411,9 +419,9 @@ function sceneChecks(scene: Scene) {
   // then a plain bar. Only one bar check can pass per drawing. The zone sits
   // over the front wheel in the band just above the axle line — no higher
   // than about half a wheelbase above the axles, as the prompt states — and
-  // warm geometry is never a bar, so beaks, neck strokes and leg strokes
+  // warm geometry is never a bar, so beaks, neck strokes and warm leg strokes
   // cannot read as handlebars.
-  const barItems = wheels ? stroked.filter((item) => !warm(item.element.paint.fill) && item.bounds.minX > rearCx + WB * 0.45 && item.bounds.maxX > frontCx - WB * 0.45 && item.bounds.minY < axleY - R * 0.4 && item.bounds.maxY < axleY + R * 0.4 && item.bounds.minY > axleY - WB * 0.6 && span(item.bounds).w > R * 0.15) : [];
+  const barItems = wheels ? stroked.filter((item) => !warm(item.element.paint.fill) && !warm(item.element.paint.stroke) && item.bounds.minX > rearCx + WB * 0.45 && item.bounds.maxX > frontCx - WB * 0.45 && item.bounds.minY < axleY - R * 0.4 && item.bounds.maxY < axleY + R * 0.4 && item.bounds.minY > axleY - WB * 0.6 && span(item.bounds).w > R * 0.15) : [];
   const barStyle = barItems.some((item) => item.element.curved && span(item.bounds).h > span(item.bounds).w)
     ? "drop handlebars"
     : barItems.some((item) => item.element.curved && span(item.bounds).w > R * 0.5)
@@ -457,14 +465,16 @@ function sceneChecks(scene: Scene) {
   // ellipse (a bird's body is wide enough to fake a frame otherwise). A
   // small filled shape within a wheel radius of it is seat hardware — a
   // saddle, a seat post top — never a tail, no matter where a narrow
-  // upright body happens to sit.
+  // upright body happens to sit. Small means at most the tail check's own
+  // stated minimum (two fifths of a wheel radius): a taller shape is a
+  // candidate tail, exactly as the prompt states.
   const frameMembers = stroked.filter((item) => item.element.name === "path" || item.element.name === "line" || item.element.name === "polyline");
   const frameTop = frameMembers
     .filter((item) => between(item) && span(item.bounds).w > WB * 0.4 && item.bounds.minY < axleY - R * 0.5)
     .reduce((top, item) => Math.min(top, item.bounds.minY), Infinity);
   const seatHardware = (item: { bounds: Bounds }) => {
     const { w, h } = span(item.bounds);
-    return Number.isFinite(frameTop) && w <= R * 2 && h <= R * 0.5 && Math.abs(item.bounds.minY - frameTop) <= R;
+    return Number.isFinite(frameTop) && w <= R * 2 && h <= R * 0.4 && Math.abs(item.bounds.minY - frameTop) <= R;
   };
   const checks: Record<string, boolean> = {
     "two wheels": Boolean(wheels),

@@ -1,10 +1,10 @@
 import type { RunReport } from "benchmark-core";
+import { safeSvg } from "./svg-grader.js";
 
 const xml = (value: string) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 
 export function renderPelicanCard(report: RunReport): string {
-  const candidate = report.rows.find((row) => row.score >= 0.5 && typeof row.submission?.answer === "string")?.submission?.answer ?? "";
-  const extracted = candidate.match(/<svg[\s\S]*<\/svg>/)?.[0] ?? "";
+  const extracted = report.rows.flatMap((row) => (row.score >= 0.5 && typeof row.submission?.answer === "string" ? [safeSvg(row.submission.answer)] : [])).find(Boolean) ?? "";
   const drawing = extracted
     ? extracted.replace(/^<svg\b/, '<svg x="680" y="120" width="450" height="390" preserveAspectRatio="xMidYMid meet"')
     : '<svg x="680" y="120" width="450" height="390" viewBox="0 0 450 390"><rect width="450" height="390" rx="24" fill="#e2e8f0"/><text x="225" y="205" text-anchor="middle" fill="#475569" font-family="system-ui,sans-serif" font-size="24">No passing SVG</text></svg>';

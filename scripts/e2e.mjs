@@ -30,6 +30,16 @@ assert.match(shareCard, /Pelican Bicycle SVG/);
 assert.match(shareCard, /<svg x="680"[^>]+aria-label=/, "share card must embed a passing submitted drawing");
 await writeFile("artifacts/not-a-report.json", '{"rows":[]}\n');
 await assert.rejects(execFile(process.execPath, ["dist/cli.js", "card", "artifacts/not-a-report.json"]), /File is not a run report/);
+// Only the validated extracted SVG may reach the share card: a hostile first
+// fence followed by a clean fence must leave no markup behind.
+const hostileReport = JSON.parse(JSON.stringify(report));
+hostileReport.rows[0].score = 0.9;
+hostileReport.rows[0].submission = { answer: `\`\`\`svg\n<svg viewBox="0 0 10 10" onload="alert(1)"><rect width="10" height="10"/></svg>\n\`\`\`\n\`\`\`svg\n<svg viewBox="0 0 10 10"><rect width="10" height="10" fill="#396"/></svg>\n\`\`\`` };
+await writeFile("artifacts/hostile-report.json", `${JSON.stringify(hostileReport)}\n`);
+await execFile(process.execPath, ["dist/cli.js", "card", "artifacts/hostile-report.json", "artifacts/hostile-card.svg"]);
+const hostileCard = await readFile("artifacts/hostile-card.svg", "utf8");
+assert.ok(!hostileCard.includes("onload"), "share card must not embed unvalidated markup");
+assert.match(hostileCard, /viewBox="0 0 10 10"/, "share card must embed the validated fence");
 const provenanceCli = JSON.parse((await execFile(process.execPath, ["dist/cli.js", "provenance", "--json"])).stdout);
 assert.equal(provenanceCli.provenance.length, 2);
 const indexCli = JSON.parse((await execFile(process.execPath, ["dist/cli.js", "index-entry", "--json"])).stdout);

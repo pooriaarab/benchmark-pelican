@@ -33,7 +33,7 @@ export const PART_HINTS = {
   "smooth tires": "",
   "fat tires": "very thick tires, the tire stroke at least a third of the wheel radius",
   "second saddle": "a second small flat saddle above the frame, between the wheels or over the rear wheel — a thin flat shape, at most a third as tall as it is wide",
-  "cargo box": "a boxy cargo carrier over the front wheel",
+  "cargo box": "a boxy cargo carrier over the front wheel — not orange or yellow, which is beak territory",
   "rear rack": "a flat rack at least as wide as a wheel, right over the rear wheel",
   "battery pack": "a rectangular battery pack on the frame between the wheels, nearly as wide as a wheel and at least a third as tall as it is wide",
 };

@@ -10,7 +10,9 @@ function option(name, fallback) {
 const PUBLIC_SEED = 20261015;
 const split = option("--split", "public");
 if (!new Set(["public", "hidden"]).has(split)) throw new Error("--split must be public or hidden");
-const seed = Number(option("--seed", String(split === "public" ? PUBLIC_SEED : 8675309)));
+const seedText = option("--seed", split === "public" ? String(PUBLIC_SEED) : process.env.BPEL_HIDDEN_SEED);
+if (seedText === undefined) throw new Error("hidden split needs a private seed: pass --seed or set BPEL_HIDDEN_SEED");
+const seed = Number(seedText);
 if (!Number.isSafeInteger(seed)) throw new Error("--seed must be an integer");
 const output = option("--output", split === "public" ? "data/tasks.jsonl" : "hidden/tasks.jsonl");
 

@@ -28,13 +28,15 @@ The answer must stay below 50 KiB. The scanner rejects `script`, `foreignObject`
 
 Fill and stroke are resolved the way a renderer would: inherited from ancestors (`<g fill="...">`), then the element's own presentation attribute, then matching `style` class rules, then inline `style="..."`. A shape with no fill anywhere paints its default black.
 
-## Measuring against the drawing, not the canvas
+## Measuring against the vehicle's own wheels
 
-Every geometric check is measured against the drawing's own extent — the bounding box of the bird-plus-vehicle figure — or against named parts (the head width, the wheel radius, the wheelbase, the band above the wheel line). Nothing is measured against the `viewBox` or `width`/`height`, so scaling or translating the whole drawing leaves every check, and the score, unchanged. The E2E proves this by rescaling and shifting every reference drawing and asserting identical scores.
+The wheels are found first: the two circles that a frame line or path actually connects — a stroked line, path, or polyline whose bounds reach within half a wheel radius of both centres. The pair must be alike in size, roughly level, and clearly separated; a concentric outer ring hugging a wheel is a tyre ring, not a wheel, and a loose circle — a sun, a ball, a hub dot — is never a wheel because no frame reaches it. A drawing whose frame misses the hubs falls back to the lowest similar round pair so the reasons stay accurate.
 
-The extent deliberately excludes decoration. A background rectangle covering the canvas and any long thin horizontal stroke (a ground line or horizon) are decoration outright. Everything else joins the figure only when it passes two tests: it touches a shape that is already connected (bounding boxes meet, with a hairline pad for anti-aliasing gaps), and it sits within one wheel diameter of the wheels or of the bird's body anchor — the largest round shape above the vehicle. A sun or a cloud near the bird fails one test or the other, so decoration can come and go without moving a check; the E2E places suns and clouds at several distances on every reference drawing and asserts identical scores. One limit remains: a shape that literally overlaps the figure inside that distance — a cloud resting on the bird's back — still counts as part of the drawing.
+Every geometric check is then derived from the vehicle itself: the wheel radius R, the wheelbase WB between the axles, and the axle line axleY. No check reads the canvas, the `viewBox`, or the size of the whole drawing, so scaling, translating, or widening the canvas leaves every score unchanged. The E2E proves this by rescaling and shifting every reference drawing, and by widening the canvas to 1000, 1280, and 1600 with a full-width ground line, a ground band, or no ground — all scores identical.
 
-Part checks see only the connected figure, with one deliberate exception: a beak is warm-coloured geometry that overlaps the head it hangs from (or hangs below an attached beak), so a long beak reaching past the distance rule still grades and a warm sun floating near the head can never join the beak union.
+The figure is whatever touches the wheels, transitively, within a hairline pad for anti-aliasing gaps. Two kinds of decoration can never join: a background rectangle covering the canvas, and any long thin horizontal stroke or band wider than 1.35 wheelbases and under a fifth as tall as it is wide (a ground line, a horizon, a sky band). A detached shape — a sun, a cloud — that does not touch the figure cannot join either. One limit remains, measured: a shape that literally overlaps the figure counts as part of it. In a seeded sweep of 200 warm suns scattered over the reference drawings, 13 moved a score and every one of them touched the figure; no detached decoration ever did.
+
+Part checks see only the connected figure, with one deliberate exception: a beak is warm-coloured geometry that overlaps the head it hangs from, or a pouch — a second warm shape that starts under the head and hangs clearly below the head's centre line and below the beak's lower edge. A warm dot at the beak's far edge or inside the beak's own bounds can neither be a pouch nor reclassify the beak.
 
 ## Checks and scoring
 
@@ -47,20 +49,20 @@ taskFit = 0.4 ^ (missed required task-specific parts + unrequested task-specific
 
 The shared gate holds the checks every task asks for: safe well-formed markup, two wheels, a bicycle frame, handlebars, pedals, a bird body, a bird head, a beak, legs reaching the pedals, and canvas coverage. The task fit holds the parts that change per task: the named animal's beak style, neck, body posture, legs and extras, and the named vehicle's handlebar style, wheel size, tire class, and extras. A memorised drawing of the wrong bird fails the specific checks instead of coasting on the shared ones, and a drawing that adds parts the task never asked for is penalised the same way.
 
-Each task's `metadata.requiredParts` lists the parts the prompt states; the generator asserts every checked part appears in the prompt text, and each prompt spells out what the grader measures in plain terms with the real numbers where a check needs one ("a straight orange or yellow beak at least 1.6 times as long as the head is wide", "a tire stroke at least 0.28 times the wheel radius"). The E2E includes a prompt-only policy that parses the prompt text alone — never `task.expected` or `task.metadata` — and draws simple literal shapes on 1000x600, 640x480, and 800x500 canvases, sharing no layout code with the task generator. Measured today, that deliberately naive policy earns a mean of 0.995 and at least 0.8 on all 30 public tasks and all 30 tasks on two hidden seeds. That is a measured floor for one literal policy, not a promise about every drawing: a part placed oddly or shaped outside its stated description can still miss its check. Each missed or improvised specific part costs a 0.4x multiplier. The E2E also replays every task's reference drawing on every other task in both splits, so the separation is measured rather than assumed.
+Each task's `metadata.requiredParts` lists the parts the prompt states; the generator asserts every checked part appears in the prompt text, and each prompt spells out what the grader measures in plain terms with the real numbers where a check needs one ("a straight orange or yellow beak at least 1.6 times as long as the head is wide", "a tire stroke at least 0.28 times the wheel radius thick — thicker counts too"). The E2E includes a prompt-only policy that parses the prompt text alone — never `task.expected` or `task.metadata` — and draws simple literal shapes on 1000x600 and 640x480 canvases, with a prompt-hash choice of no ground, a ground line, or a ground band, sharing no layout code with the task generator. Measured today, that deliberately naive policy earns a mean of 1.000 and at least 0.8 on all 30 public tasks and all 30 tasks on two hidden seeds. That is a measured floor for one literal policy, not a promise about every drawing: a part placed oddly or shaped outside its stated description can still miss its check. Each missed or improvised specific part costs a 0.4x multiplier. The E2E also replays every task's reference drawing on every other task in both splits, so the separation is measured rather than assumed.
 
 ### Shared gate checks
 
 | Check | Weight | Evidence |
 | --- | ---: | --- |
 | svg canvas | 0.05 | One `svg` root with positive dimensions or a positive `viewBox` |
-| complexity | 0.08 | 12 to 200 visible geometry elements |
+| complexity | 0.08 | 8 to 200 shapes in the connected figure |
 | coverage | 0.02 | The drawing's own extent is non-degenerate: a landscape scene, not a thin strip |
-| two wheels | 0.15 | Two separated, similarly sized circles or ellipses in the lower region |
-| bicycle frame | 0.11 | Stroked geometry spanning the gap between the wheels, above wheel centres |
-| handlebars | 0.06 | Stroked geometry in the front half of the bicycle, in the band just above the wheel line and no higher than about half a wheelbase above the axles; warm-coloured geometry never counts (it is beak territory) |
+| two wheels | 0.15 | Two similar, roughly level, clearly separated circles or ellipses that a frame line or path reaches at both centres |
+| bicycle frame | 0.11 | Stroked geometry spanning the gap between the wheels, reaching above the axle line |
+| handlebars | 0.06 | Stroked geometry over the front wheel, in the band just above the axle line and no higher than about half a wheelbase above the axles; warm-coloured geometry never counts (it is beak territory) |
 | pedals | 0.05 | A small shape (a crank hub or pedal) between the wheels, near axle height |
-| bird body | 0.12 | The largest substantial round or elliptical body above the bicycle |
+| bird body | 0.12 | The largest substantial round or elliptical body above the axle line |
 | bird head | 0.07 | A smaller round above and ahead of the body |
 | beak | 0.10 | Warm-coloured filled geometry attached to the head |
 | legs reaching the pedals | 0.05 | Stroked geometry descending from the body region to the pedal zone |
@@ -75,11 +77,11 @@ Each task requires its own subset, and a passing check the task did not request 
 | neck | `long neck` (a stroked bridge from body to head) or `short neck` |
 | body posture | `upright body` (at least as tall as wide) or `level body` |
 | long legs | A thin leg stroke leaving the body and dropping clearly below the wheel axles |
-| tail feathers | Filled geometry with real height behind the body |
+| tail feathers | Filled geometry with real height trailing just behind the body |
 | bar styles | Exactly one of: drop handlebars (a curl taller than it is wide), swept handlebars (a curve sweeping back toward the rider), or plain handlebars |
-| wheel size | `small wheels` (radius under 14% of the scene's height) or `full-size wheels` |
-| tires | `knobby tires` (a tread stroke at least 0.28 times the wheel radius, a dashed ring, or a second ring hugging the tire), `fat tires` (at least a third of the wheel radius), or `smooth tires` |
-| extras | `second saddle` (a second small flat shape between the wheels, ellipse or flat rect), `cargo box`, `rear rack`, `battery pack` (a rect between the wheels nearly as wide as a wheel, so an ordinary rectangular saddle does not count) |
+| wheel size | `small wheels` (each wheel radius under a seventh of the wheelbase) or `full-size wheels` |
+| tires | `knobby tires` (a tire stroke at least 0.28 times the wheel radius — no upper bound — a dashed tread line, or a second ring hugging the tire), `fat tires` (at least a third of the wheel radius), or `smooth tires`. A fat tire counts as a rugged tire too: when a task asks for knobby tires an extra-thick stroke is not an unrequested part |
+| extras | `second saddle` (a second small flat filled seat — ellipse, rect, or filled path — above the frame, between the wheels or over the rear wheel, narrower than a wheel and at most a third as tall as it is wide), `cargo box` (a boxy filled carrier over the front wheel), `rear rack` (a thin flat rect at least as wide as a wheel, right over the rear wheel), `battery pack` (a rect on the frame between the wheels, nearly as wide as a wheel and at least a third as tall as it is wide) |
 
 Warm colours mean orange through yellow hues only; cream and near-white fills do not count. Beak checks read only warm geometry that overlaps the head (or hangs below an attached beak), so a stray warm shape elsewhere — a sun, a label — neither passes as a beak nor reclassifies one.
 

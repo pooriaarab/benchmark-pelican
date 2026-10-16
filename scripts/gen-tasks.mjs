@@ -64,23 +64,23 @@ const ANIMALS = {
 const VEHICLES = {
   public: {
     "bicycle": { bars: "handlebars", tires: "smooth tires", extras: [], wheelbase: 340, wheelR: 66, tire: 12 },
-    "tandem bicycle": { bars: "handlebars", tires: "smooth tires", extras: ["second saddle"], wheelbase: 430, wheelR: 64, tire: 10 },
+    "tandem bicycle": { bars: "handlebars", tires: "smooth tires", extras: ["second saddle"], wheelbase: 430, wheelR: 74, tire: 10 },
     "cargo bicycle": { bars: "handlebars", tires: "smooth tires", extras: ["cargo box"], wheelbase: 350, wheelR: 62, tire: 12 },
     "mountain bike": { bars: "handlebars", tires: "knobby tires", extras: [], wheelbase: 340, wheelR: 70, tire: 15 },
     "road bicycle": { bars: "drop handlebars", tires: "smooth tires", extras: [], wheelbase: 345, wheelR: 68, tire: 8 },
     "touring bicycle": { bars: "handlebars", tires: "smooth tires", extras: ["rear rack"], wheelbase: 350, wheelR: 66, tire: 10 },
     "cruiser bicycle": { bars: "swept handlebars", tires: "smooth tires", extras: [], wheelbase: 330, wheelR: 68, tire: 13 },
-    "folding bicycle": { bars: "handlebars", tires: "smooth tires", extras: [], wheelbase: 290, wheelR: 36, tire: 8 },
+    "folding bicycle": { bars: "handlebars", tires: "smooth tires", extras: [], wheelbase: 290, wheelR: 30, tire: 6 },
   },
   hidden: {
     "electric bicycle": { bars: "handlebars", tires: "smooth tires", extras: ["battery pack"], wheelbase: 345, wheelR: 66, tire: 11 },
-    "BMX bike": { bars: "handlebars", tires: "smooth tires", extras: [], wheelbase: 285, wheelR: 36, tire: 8 },
+    "BMX bike": { bars: "handlebars", tires: "smooth tires", extras: [], wheelbase: 285, wheelR: 30, tire: 6 },
     "gravel bike": { bars: "drop handlebars", tires: "knobby tires", extras: [], wheelbase: 340, wheelR: 66, tire: 12 },
     "city bike": { bars: "swept handlebars", tires: "smooth tires", extras: ["rear rack"], wheelbase: 335, wheelR: 66, tire: 11 },
     "track bicycle": { bars: "drop handlebars", tires: "smooth tires", extras: [], wheelbase: 350, wheelR: 68, tire: 7 },
     "commuter bicycle": { bars: "handlebars", tires: "smooth tires", extras: ["rear rack"], wheelbase: 340, wheelR: 65, tire: 10 },
     "hybrid bicycle": { bars: "handlebars", tires: "knobby tires", extras: [], wheelbase: 338, wheelR: 67, tire: 12 },
-    "fat bike": { bars: "handlebars", tires: "fat tires", extras: [], wheelbase: 345, wheelR: 72, tire: 26 },
+    "fat bike": { bars: "swept handlebars", tires: "fat tires", extras: [], wheelbase: 345, wheelR: 72, tire: 26 },
   },
 };
 
@@ -90,7 +90,7 @@ const article = (word) => (/^[aeiou]/i.test(word) ? "an" : "a");
 // that tells the model what to draw. The self-check below proves every checked
 // part is visible in the prompt.
 function partsFor(animal, aspect, vehicle, spec) {
-  const wheelSize = spec.wheelR >= 52 ? "full-size wheels" : "small wheels";
+  const wheelSize = spec.wheelbase / spec.wheelR >= 7 ? "small wheels" : "full-size wheels";
   const tires = spec.tires === "fat tires" ? ["knobby tires", "fat tires"] : [spec.tires];
   const specific = [
     aspect.beak, aspect.neck, aspect.body,

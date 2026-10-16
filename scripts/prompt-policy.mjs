@@ -1,9 +1,11 @@
-// Prompt-only policy: a deliberately naive drawing built purely from what the
-// prompt text states. It parses the part phrases out of the task prompt and
-// lays out plain shapes with natural proportions — the way a model that only
-// reads the prompt would draw. It never reads task.expected or task.metadata,
-// and it shares no layout code, colours, or canvas with the task generator, so
-// its score measures whether the prompts really carry enough information.
+// Builder's own prompt-only policy — NOT independent; used only as a smoke
+// test. It parses the part phrases out of the task prompt and lays out plain
+// shapes, but its proportions were tuned while the grader was written, so its
+// score says only that a careful reader of the prompts can pass, not that the
+// stated numbers are right. The independent evidence lives in
+// scripts/literal-policy.mjs, which draws strictly the literal numbers the
+// prompt states (a tail just over 0.4R, legs ending at the axle line) with its
+// own layout code; only its measured range is cited in the docs.
 //
 // Everything is a fraction of the requested canvas, so the same prompt draws
 // correctly at any size. A seeded stream keyed on the prompt text and canvas

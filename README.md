@@ -52,7 +52,7 @@ seeded tasks -> model SVG -> safety scan -> geometry checks -> scored report
 
 The scanner rejects malformed, active, external, or oversized SVG. The score multiplies a shared-structure gate by a task-specific fit: each task names its required parts in the prompt, and a missed or unrequested part scales the score down. A drawing of the wrong bird cannot ride the shared checks to a high score.
 
-Every prompt states each checked part in plain terms, with the real numbers where a check needs one. A deliberately naive policy that draws only what the prompt says — jittered per prompt wherever the text leaves a number open, and measured in the E2E — earns a mean of 1.000 and at least 0.8 on all 30 tasks, on the public split and on held-out test seeds 7, 99 and 4242.
+Every prompt states each checked part in plain terms, with the real numbers where a check needs one. An independent literal-number policy that draws only the numbers each prompt states — a tail fan just over 0.4 wheel radii tall, pedals on the axle line, tire strokes just over their stated minimums — earns a measured mean of 1.000 with all 30 tasks at 0.8 or above on every split exercised: the public split and held-out test seeds 7, 99 and 4242. Tail fans 0.42R to 0.7R tall all score exactly 1.0 on every tail task, so the stated 0.4R is the real threshold.
 
 ## Why it exists
 

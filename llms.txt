@@ -18,7 +18,7 @@ The CLI supports list, show, run, score, card, provenance, index-entry, serve, a
 
 Thirty single-answer tasks come from one canonical prompt and a seeded animal and bicycle grid. The grader extracts the single SVG block, rejects unsafe markup, then scores the task's required parts as a multiplicative shared-gate x task-fit product with bicycle-or-bird evidence caps, all measured against the vehicle's own wheels — radius, wheelbase and axle line — never the canvas. Reports carry a per-check `checkSummary`. It does not use a model judge.
 
-Public seed: 20261015. Hidden outputs must stay outside the package. Detailed rules ship in `docs/grading.md`. A deliberately naive prompt-only policy, jittered wherever a prompt leaves a number open, measures a mean of 1.000 with all 30 tasks at 0.8 or above on the public split and on held-out test seeds 7, 99 and 4242; every reference scores exactly 1.0 on its own task across 30 held-out seeds.
+Public seed: 20261015. Hidden outputs must stay outside the package. Detailed rules ship in `docs/grading.md`. An independent literal-number policy that draws only the numbers each prompt states measures a mean of 1.000 with all 30 tasks at 0.8 or above on the public split and on held-out test seeds 7, 99 and 4242, and tail fans 0.42R-0.7R tall all score exactly 1.0 on every tail task; every reference scores exactly 1.0 on its own task across 30 held-out seeds. A beak may be a filled warm shape or a warm stroke at least 0.06 wheel radii wide; a drop curl must be one curved path taller than it is wide.
 
 ## Gallery
 

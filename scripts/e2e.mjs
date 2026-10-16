@@ -10,6 +10,7 @@ import { provenanceMarkdown } from "benchmark-core";
 import { benchmark } from "../dist/index.js";
 import { GATE_PARTS, PART_PHRASES } from "./parts.mjs";
 import { promptOnlySvg, transformSvg } from "./prompt-policy.mjs";
+import { literalPolicySvg } from "./literal-policy.mjs";
 const execFile = promisify(execFileCallback);
 
 await execFile("npm", ["run", "build"]);
@@ -150,26 +151,31 @@ for (const [s, dx, dy] of [[0.6, 0, 0], [0.85, 0, 0], [1.08, 0, 0], [1.3, 0, 0],
 const referenceMean = referenceScores.reduce((a, { score }) => a + score, 0) / referenceScores.length;
 for (const strategy of weakAnswers) assert.ok(adversarialScores[strategy.name] < referenceMean - 0.5, `${strategy.name} must be well below the reference policy`);
 
-// A model sees only the prompt text, so a deliberately naive policy that draws
-// literally what the prompt states — its own layout, no shared generator code
-// — must reach most of the suite on any canvas size. The policy jitters what
-// the prompts leave open, seeded by the prompt text: leg bottoms land anywhere
-// in [-0.2R, +0.3R] of the axle line, and body and handlebar proportions
-// wander. Measured 2026-10-16: mean 1.000 and 30/30 at 0.8 or above on the
-// public split and on held-out test seeds 7, 99 and 4242, at 1000x600
-// and 640x480.
-// The bound below is that measurement minus a margin of five tasks.
+// A model sees only the prompt text, so two policies exercise the prompts.
+// The independent literal-number policy (scripts/literal-policy.mjs) draws
+// exactly the numbers each prompt states — a tail 0.42-0.5R tall where the
+// prompt says "taller than 0.4 times the wheel radius", pedals on the axle
+// line, tire strokes just over their stated minimums — with its own layout
+// and seeded jitter; its measured range is the evidence cited in the docs.
+// The builder's tuned prompt-only policy (scripts/prompt-policy.mjs) is kept
+// only as a smoke test that a careful prompt-reader can pass.
+// Measured 2026-10-16: the literal policy scores a mean of 1.000 with 30/30
+// at 0.8 or above on the public split and on held-out test seeds 7, 99 and
+// 4242; the bound below is that measured minimum minus a margin of five.
 const PROMPT_ONLY_MIN = 25;
+const LITERAL_MIN = 25;
 const promptOnlyCanvases = [[1000, 600], [640, 480]];
-async function promptOnlyRun(bench, list) {
+async function policyRun(bench, list, draw) {
   const scores = [];
   for (const [index, task] of list.entries()) {
     const [w, h] = promptOnlyCanvases[index % promptOnlyCanvases.length];
-    scores.push((await bench.score(task, { answer: promptOnlySvg(String(task.prompt), w, h) })).score);
+    scores.push((await bench.score(task, { answer: draw(String(task.prompt), w, h) })).score);
   }
   return { mean: Math.round(scores.reduce((a, s) => a + s, 0) / scores.length * 1000) / 1000, at_least_0_8: scores.filter((score) => score >= 0.8).length };
 }
-const promptOnlyScores = { public: await promptOnlyRun(benchmark, tasks) };
+const literalScores = { public: await policyRun(benchmark, tasks, literalPolicySvg) };
+assert.ok(literalScores.public.at_least_0_8 >= LITERAL_MIN, `literal policy must score >=0.8 on at least ${LITERAL_MIN} public tasks, got ${literalScores.public.at_least_0_8}`);
+const promptOnlyScores = { public: await policyRun(benchmark, tasks, promptOnlySvg) };
 assert.ok(promptOnlyScores.public.at_least_0_8 >= PROMPT_ONLY_MIN, `prompt-only policy must score >=0.8 on at least ${PROMPT_ONLY_MIN} public tasks, got ${promptOnlyScores.public.at_least_0_8}`);
 
 // The real memorised-reference attack: replay every task's own reference drawing
@@ -248,6 +254,16 @@ for (const [name, markup] of painted) {
   const { score } = await benchmark.score(tasks[0], { answer: canonical.replace(beakPaths[0], markup) });
   assert.equal(score, 1, `beak painted via ${name} must still score 1`);
 }
+// A beak may also be a stroked warm curve with a stroke at least 0.06 wheel
+// radii wide; a hairline warm outline is too thin to read as a beak.
+const strokedBeak = beakPaths[0]
+  .replaceAll(/ fill="#[0-9a-f]+"/g, ' fill="none"')
+  .replaceAll('stroke="#9c6644" stroke-width="4"', 'stroke="#f4a261" stroke-width="8"');
+assert.equal((await benchmark.score(tasks[0], { answer: canonical.replace(beakPaths[0], strokedBeak) })).score, 1, "a stroked warm beak must still score 1");
+const hairlineBeak = beakPaths[0]
+  .replaceAll(/ fill="#[0-9a-f]+"/g, ' fill="none"')
+  .replaceAll('stroke="#9c6644" stroke-width="4"', 'stroke="#f4a261" stroke-width="2"');
+assert.ok((await benchmark.score(tasks[0], { answer: canonical.replace(beakPaths[0], hairlineBeak) })).score <= 0.2, "a hairline beak outline must not read as a beak");
 for (const hostile of [
   `<svg viewBox="0 0 100 100"><style>@import "https://bad.invalid/x"</style><rect width="10" height="10"/></svg>`,
   `<svg viewBox="0 0 100 100"><style>.a{fill:url(https://bad.invalid/x)}</style><rect class="a" width="10" height="10"/></svg>`,
@@ -297,13 +313,39 @@ for (const [seed, { bench, tasks: list }] of hiddenSuites) {
   const scores = await Promise.all(list.map((task) => bench.score(task, { answer: String(task.expected) })));
   assert.ok(scores.every(({ score }) => score === 1), `every hidden reference must score exactly 1 (seed ${seed})`);
 }
-// The prompt-only measurement runs per split: public, and held-out seeds 7,
-// 99 and 4242. Bounds are the measured counts minus the same margin.
+// The policy measurements run per split: public, and held-out seeds 7, 99
+// and 4242. Bounds are the measured minimums minus the same margin.
 for (const seed of [7, 99, 4242]) {
   const { bench, tasks: list } = hiddenSuites.get(seed);
-  const result = await promptOnlyRun(bench, list);
+  const literal = await policyRun(bench, list, literalPolicySvg);
+  literalScores[`hidden_seed_${seed}`] = literal;
+  assert.ok(literal.at_least_0_8 >= LITERAL_MIN, `literal policy must score >=0.8 on at least ${LITERAL_MIN} hidden-seed-${seed} tasks, got ${literal.at_least_0_8}`);
+  const result = await policyRun(bench, list, promptOnlySvg);
   promptOnlyScores[`hidden_seed_${seed}`] = result;
   assert.ok(result.at_least_0_8 >= PROMPT_ONLY_MIN, `prompt-only policy must score >=0.8 on at least ${PROMPT_ONLY_MIN} hidden-seed-${seed} tasks, got ${result.at_least_0_8}`);
+}
+// Tail sweep: the prompt states a fan must be taller than 0.4 times the wheel
+// radius, so a filled fan at every height from 0.42R to 0.7R must score
+// exactly 1 on every tail task on the public split and on held-out seeds 7,
+// 99 and 4242. The probe swaps each reference's own tail fan for a plain
+// filled triangle of the measured height.
+const TAIL_PATH = /<path d="M([\d.]+) ([\d.]+)q-46 4 -64 44q48 -4 70 -28"[^>]*\/>/;
+const tailSweep = { heights: [0.42, 0.45, 0.48, 0.52, 0.7], tasks: 0, misses: [] };
+for (const [label, bench, list] of [["public", benchmark, tasks], ...[7, 99, 4242].map((seed) => [`hidden_seed_${seed}`, hiddenSuites.get(seed).bench, hiddenSuites.get(seed).tasks])]) {
+  for (const task of list.filter((item) => (item.metadata?.requiredParts ?? []).includes("tail feathers"))) {
+    const expected = String(task.expected);
+    const tail = expected.match(TAIL_PATH);
+    assert.ok(tail, `${task.id} reference must carry a tail fan`);
+    const radius = Number(expected.match(/<circle cx="[\d.]+" cy="[\d.]+" r="([\d.]+)" fill="none"/)[1]);
+    const x = Number(tail[1]), y = Number(tail[2]);
+    tailSweep.tasks += 1;
+    for (const k of tailSweep.heights) {
+      const fan = `<path d="M${x} ${y}L${Math.round((x - radius * 0.5) * 10) / 10} ${Math.round((y + radius * k) * 10) / 10}L${x} ${Math.round((y + radius * k * 0.55) * 10) / 10}Z" fill="#8ecae6"/>`;
+      const { score } = await bench.score(task, { answer: expected.replace(TAIL_PATH, fan) });
+      if (score !== 1) tailSweep.misses.push(`${label}:${task.id}@${k}R=${score}`);
+      assert.equal(score, 1, `${task.id} must accept a ${k}R tail fan, got ${score}`);
+    }
+  }
 }
 for (const [s, dx, dy] of [[0.8, 0, 0], [1.25, 0, 0], [1, 30, -15]]) {
   const moved = await Promise.all(hiddenTasks.map((task) => hiddenBenchmark.score(task, { answer: transformSvg(String(task.expected), s, dx, dy) })));
@@ -384,6 +426,8 @@ const artifact = {
   honest_answer_scores: honestScores,
   memorised_reference: memorisedReference,
   prompt_only_scores: promptOnlyScores,
+  literal_policy_scores: literalScores,
+  tail_sweep: tailSweep,
   canvas_width_invariance: canvasRows,
   decoration_sweep: { probes: sweepTotal, changed: sweepChanged },
   hidden_split: { tasks: hiddenTasks.length, reference_perfect_seeds: hiddenSeeds.length, public_reference_max: Math.max(...hiddenCross.map(({ score }) => score)), memorised_reference: hiddenMemorisedReference },

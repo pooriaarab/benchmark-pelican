@@ -105,7 +105,7 @@ function partsFor(animal, aspect, vehicle, spec) {
   const animalText = `${article(aspect.beak)} ${aspect.beak}${hint(aspect.beak)}, ${article(aspect.neck)} ${aspect.neck}${hint(aspect.neck)}, ${article(aspect.body)} ${aspect.body}${hint(aspect.body)}, a head, and ${birdLegs}${aspect.extras.length ? `, plus ${aspect.extras.map((extra) => `${extra} ${hint(extra)}`).join(" and ")}` : ""}`;
   const extras = spec.extras.map((extra) => `${article(extra)} ${extra}${hint(extra)}`).join(" and ");
   const vehicleText = `two wheels, a bicycle frame, ${spec.bars}${hint(spec.bars)}, pedals${hint("pedals")}, ${wheelSize}${hint(wheelSize)}, ${tires.map((tire) => `${tire}${hint(tire)}`).join(" and ")}${extras ? `, plus ${extras}` : ""}`;
-  const clause = ` The ${animal} has ${animalText}. The ${vehicle} has ${vehicleText}.`;
+  const clause = ` The ${animal} has ${animalText}. The ${vehicle} has ${vehicleText}. Draw the beak as a filled shape, not a bare outline.`;
   return { requiredParts, clause };
 }
 

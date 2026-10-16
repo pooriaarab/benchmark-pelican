@@ -152,18 +152,24 @@ for (const strategy of weakAnswers) assert.ok(adversarialScores[strategy.name] <
 
 // A model sees only the prompt text, so a deliberately naive policy that draws
 // literally what the prompt states — its own layout, no shared generator code
-// — must reach most of the suite on any canvas size. Measured today: every
-// task at 0.8 or above (mean 1.00) on the public split and on hidden seeds
-// 424242 and 7, at 1000x600 and 640x480. The bound below is that measurement
-// minus a margin of five tasks.
+// — must reach most of the suite on any canvas size. The policy jitters what
+// the prompts leave open, seeded by the prompt text: leg bottoms land anywhere
+// in [-0.2R, +0.3R] of the axle line, and body and handlebar proportions
+// wander. Measured 2026-10-16: mean 1.000 and 30/30 at 0.8 or above on the
+// public split and on hidden seeds 7, 99 and 4242, at 1000x600 and 640x480.
+// The bound below is that measurement minus a margin of five tasks.
+const PROMPT_ONLY_MIN = 25;
 const promptOnlyCanvases = [[1000, 600], [640, 480]];
-const promptOnly = [];
-for (const [index, task] of tasks.entries()) {
-  const [w, h] = promptOnlyCanvases[index % promptOnlyCanvases.length];
-  const { score } = await benchmark.score(task, { answer: promptOnlySvg(String(task.prompt), w, h) });
-  promptOnly.push(score);
+async function promptOnlyRun(bench, list) {
+  const scores = [];
+  for (const [index, task] of list.entries()) {
+    const [w, h] = promptOnlyCanvases[index % promptOnlyCanvases.length];
+    scores.push((await bench.score(task, { answer: promptOnlySvg(String(task.prompt), w, h) })).score);
+  }
+  return { mean: Math.round(scores.reduce((a, s) => a + s, 0) / scores.length * 1000) / 1000, at_least_0_8: scores.filter((score) => score >= 0.8).length };
 }
-assert.ok(promptOnly.filter((score) => score >= 0.8).length >= 25, `prompt-only policy must score >=0.8 on at least 25 public tasks, worst was ${Math.min(...promptOnly)}`);
+const promptOnlyScores = { public: await promptOnlyRun(benchmark, tasks) };
+assert.ok(promptOnlyScores.public.at_least_0_8 >= PROMPT_ONLY_MIN, `prompt-only policy must score >=0.8 on at least ${PROMPT_ONLY_MIN} public tasks, got ${promptOnlyScores.public.at_least_0_8}`);
 
 // The real memorised-reference attack: replay every task's own reference drawing
 // against every other task. One memorised SVG must not separate from a wrong
@@ -273,6 +279,31 @@ const hiddenCross = await Promise.all(hiddenTasks.map((task) => hiddenBenchmark.
 assert.ok(hiddenCross.every(({ score }) => score < 1), "a public reference must score below 1 on hidden tasks");
 const hiddenReferenceScores = await Promise.all(hiddenTasks.map((task) => hiddenBenchmark.score(task, { answer: String(task.expected) })));
 assert.ok(hiddenReferenceScores.every(({ score }) => score === 1), "every hidden reference must score exactly 1");
+// Every reference drawing must score exactly 1 on its own task across 30
+// hidden seeds — not only the seeds used elsewhere in this file — so a
+// seed-specific false positive (a saddle read as a tail, a leg read as a
+// wader's) cannot hide behind one lucky split.
+const hiddenSeeds = [7, 99, 2026, 4242, 424242, 1, 13, 42, 77, 123, 314, 555, 777, 1000, 1337, 2048, 3000, 5000, 9001, 12345, 31337, 65535, 99999, 111111, 222222, 314159, 555555, 777777, 888888, 999983];
+const hiddenSuites = new Map([[424242, { bench: hiddenBenchmark, tasks: hiddenTasks }]]);
+for (const seed of hiddenSeeds) {
+  if (hiddenSuites.has(seed)) continue;
+  const file = `artifacts/tasks.hidden-${seed}.jsonl`;
+  await execFile(process.execPath, ["scripts/gen-tasks.mjs", "--split", "hidden", "--seed", String(seed), "--output", file]);
+  const bench = createBenchmark(file);
+  hiddenSuites.set(seed, { bench, tasks: await bench.listTasks() });
+}
+for (const [seed, { bench, tasks: list }] of hiddenSuites) {
+  const scores = await Promise.all(list.map((task) => bench.score(task, { answer: String(task.expected) })));
+  assert.ok(scores.every(({ score }) => score === 1), `every hidden reference must score exactly 1 (seed ${seed})`);
+}
+// The prompt-only measurement runs per split: public, and hidden seeds 7, 99
+// and 4242. Bounds are the measured counts minus the same margin.
+for (const seed of [7, 99, 4242]) {
+  const { bench, tasks: list } = hiddenSuites.get(seed);
+  const result = await promptOnlyRun(bench, list);
+  promptOnlyScores[`hidden_seed_${seed}`] = result;
+  assert.ok(result.at_least_0_8 >= PROMPT_ONLY_MIN, `prompt-only policy must score >=0.8 on at least ${PROMPT_ONLY_MIN} hidden-seed-${seed} tasks, got ${result.at_least_0_8}`);
+}
 for (const [s, dx, dy] of [[0.8, 0, 0], [1.25, 0, 0], [1, 30, -15]]) {
   const moved = await Promise.all(hiddenTasks.map((task) => hiddenBenchmark.score(task, { answer: transformSvg(String(task.expected), s, dx, dy) })));
   assert.ok(moved.every(({ score }) => score === 1), `hidden references stay at 1 under scale ${s} shift ${dx},${dy}`);
@@ -282,22 +313,6 @@ for (const [name, apply] of decorationVariants.slice(4)) {
   const scored = await Promise.all(hiddenTasks.map((task) => hiddenBenchmark.score(task, { answer: apply(String(task.expected)) })));
   assert.ok(scored.every((row, index) => row.score === hiddenReferenceScores[index].score), `decoration "${name}" must leave every hidden reference score unchanged`);
 }
-const hiddenPromptOnly = [];
-for (const [index, task] of hiddenTasks.entries()) {
-  const [w, h] = promptOnlyCanvases[index % promptOnlyCanvases.length];
-  hiddenPromptOnly.push((await hiddenBenchmark.score(task, { answer: promptOnlySvg(String(task.prompt), w, h) })).score);
-}
-assert.ok(hiddenPromptOnly.filter((score) => score >= 0.8).length >= 25, `prompt-only policy must score >=0.8 on at least 25 hidden tasks, worst was ${Math.min(...hiddenPromptOnly)}`);
-// A second hidden seed proves the prompt-only result is not seed luck.
-await execFile(process.execPath, ["scripts/gen-tasks.mjs", "--split", "hidden", "--seed", "7", "--output", "artifacts/tasks.hidden-7.jsonl"]);
-const hidden7Benchmark = createBenchmark("artifacts/tasks.hidden-7.jsonl");
-const hidden7Tasks = await hidden7Benchmark.listTasks();
-const hidden7PromptOnly = [];
-for (const [index, task] of hidden7Tasks.entries()) {
-  const [w, h] = promptOnlyCanvases[index % promptOnlyCanvases.length];
-  hidden7PromptOnly.push((await hidden7Benchmark.score(task, { answer: promptOnlySvg(String(task.prompt), w, h) })).score);
-}
-assert.ok(hidden7PromptOnly.filter((score) => score >= 0.8).length >= 25, `prompt-only policy must score >=0.8 on at least 25 hidden-seed-7 tasks, worst was ${Math.min(...hidden7PromptOnly)}`);
 const hiddenMemorisedReference = await memorisedReferenceProbe(hiddenTasks, hiddenBenchmark);
 for (const task of hiddenTasks) {
   const lower = String(task.prompt).toLowerCase();
@@ -367,10 +382,10 @@ const artifact = {
   adversarial_scores: adversarialScores,
   honest_answer_scores: honestScores,
   memorised_reference: memorisedReference,
-  prompt_only_scores: { mean: Math.round(promptOnly.reduce((a, b) => a + b, 0) / promptOnly.length * 1000) / 1000, at_least_0_8: promptOnly.filter((score) => score >= 0.8).length, hidden_at_least_0_8: hiddenPromptOnly.filter((score) => score >= 0.8).length, hidden_seed_7_at_least_0_8: hidden7PromptOnly.filter((score) => score >= 0.8).length },
+  prompt_only_scores: promptOnlyScores,
   canvas_width_invariance: canvasRows,
   decoration_sweep: { probes: sweepTotal, changed: sweepChanged },
-  hidden_split: { tasks: hiddenTasks.length, public_reference_max: Math.max(...hiddenCross.map(({ score }) => score)), memorised_reference: hiddenMemorisedReference },
+  hidden_split: { tasks: hiddenTasks.length, reference_perfect_seeds: hiddenSeeds.length, public_reference_max: Math.max(...hiddenCross.map(({ score }) => score)), memorised_reference: hiddenMemorisedReference },
   reference_score_range: [Math.min(...referenceScores.map(({ score }) => score)), Math.max(...referenceScores.map(({ score }) => score))],
   route_status_codes: routes, tool_names: toolNames,
   mcp_check_summary_entries: mcpRunReport.checkSummary.length,

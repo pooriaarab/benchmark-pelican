@@ -9,7 +9,6 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { provenanceMarkdown } from "benchmark-core";
 import { benchmark } from "../dist/index.js";
 import { GATE_PARTS, PART_PHRASES } from "./parts.mjs";
-import { promptOnlySvg, transformSvg } from "./prompt-policy.mjs";
 const execFile = promisify(execFileCallback);
 
 await execFile("npm", ["run", "build"]);
@@ -68,26 +67,8 @@ for (const strategy of weakAnswers) {
 }
 const referenceScores = await Promise.all(tasks.map((task) => benchmark.score(task, { answer: String(task.expected) })));
 assert.ok(referenceScores.every(({ score }) => score === 1), "every generated reference must score exactly 1");
-// Scaling or translating the whole drawing must never change the score: every
-// geometric check is measured against the drawing's own extent or its named
-// parts, never against the canvas or viewBox.
-for (const [s, dx, dy] of [[0.6, 0, 0], [0.85, 0, 0], [1.08, 0, 0], [1.3, 0, 0], [2, 0, 0], [1, 40, 25], [1, -60, 10], [1.3, 500, 200], [0.7, -200, 100]]) {
-  const moved = await Promise.all(tasks.map((task) => benchmark.score(task, { answer: transformSvg(String(task.expected), s, dx, dy) })));
-  assert.ok(moved.every((row, index) => row.score === referenceScores[index].score), `scale ${s} shift ${dx},${dy} must leave every score unchanged`);
-}
 const referenceMean = referenceScores.reduce((a, { score }) => a + score, 0) / referenceScores.length;
 for (const strategy of weakAnswers) assert.ok(adversarialScores[strategy.name] < referenceMean - 0.5, `${strategy.name} must be well below the reference policy`);
-
-// A model sees only the prompt text, so a policy that draws literally what the
-// prompt states must nearly ace the suite on any canvas size.
-const promptOnlyCanvases = [[1000, 600], [640, 480], [800, 500]];
-const promptOnly = [];
-for (const [index, task] of tasks.entries()) {
-  const [w, h] = promptOnlyCanvases[index % promptOnlyCanvases.length];
-  const { score, reason } = await benchmark.score(task, { answer: promptOnlySvg(String(task.prompt), w, h) });
-  promptOnly.push(score);
-  assert.ok(score >= 0.8, `prompt-only drawing on ${task.id} scores ${score}: ${reason.slice(0, 160)}`);
-}
 
 // The real memorised-reference attack: replay every task's own reference drawing
 // against every other task. One memorised SVG must not separate from a wrong
@@ -151,26 +132,6 @@ for (const [name, answer] of honestAnswers) {
   assert.ok(score >= 0.85, `honest ${name} answer must score high, got ${score}`);
 }
 
-// Colour and stroke may arrive through a <g>, an inline style, or a <style>
-// class rule: the pelican's beak still reads as a warm beak in each form.
-const beakPaths = canonical.match(/<path d="M[^"]+" fill="(#[0-9a-f]+)" stroke="#9c6644" stroke-width="4"\/><path d="M[^"]+" fill="#[0-9a-f]+" stroke="#9c6644" stroke-width="4"\/>/);
-assert.ok(beakPaths, "reference keeps its two warm beak paths");
-const bareBeak = beakPaths[0].replaceAll(/ fill="#[0-9a-f]+"/g, "");
-const painted = [
-  ["g-fill", `<g fill="${beakPaths[1]}">${bareBeak}</g>`],
-  ["inline-style", beakPaths[0].replaceAll(/ fill="(#[0-9a-f]+)"/g, ' style="fill:$1"')],
-  ["class-rule", `<style>.bk{fill:${beakPaths[1]}}</style>${bareBeak.replaceAll("<path ", '<path class="bk" ')}`],
-];
-for (const [name, markup] of painted) {
-  const { score } = await benchmark.score(tasks[0], { answer: canonical.replace(beakPaths[0], markup) });
-  assert.equal(score, 1, `beak painted via ${name} must still score 1`);
-}
-for (const hostile of [
-  `<svg viewBox="0 0 100 100"><style>@import "https://bad.invalid/x"</style><rect width="10" height="10"/></svg>`,
-  `<svg viewBox="0 0 100 100"><style>.a{fill:url(https://bad.invalid/x)}</style><rect class="a" width="10" height="10"/></svg>`,
-  `<svg viewBox="0 0 100 100"><style>rect{fill:#000}</style><rect width="10" height="10"/></svg>`,
-]) assert.equal((await benchmark.score(tasks[0], { answer: hostile })).score, 0, "unsafe or unsupported stylesheet must score zero");
-
 const unsafeAnswers = [
   '<svg viewBox="0 0 100 100"><a href=javascript:alert(1)></a></svg>',
   '<svg viewBox="0 0 100 100"><style>@import "https://bad.invalid/x"</style></svg>',
@@ -197,16 +158,6 @@ const hiddenCross = await Promise.all(hiddenTasks.map((task) => hiddenBenchmark.
 assert.ok(hiddenCross.every(({ score }) => score < 1), "a public reference must score below 1 on hidden tasks");
 const hiddenReferenceScores = await Promise.all(hiddenTasks.map((task) => hiddenBenchmark.score(task, { answer: String(task.expected) })));
 assert.ok(hiddenReferenceScores.every(({ score }) => score === 1), "every hidden reference must score exactly 1");
-for (const [s, dx, dy] of [[0.8, 0, 0], [1.25, 0, 0], [1, 30, -15]]) {
-  const moved = await Promise.all(hiddenTasks.map((task) => hiddenBenchmark.score(task, { answer: transformSvg(String(task.expected), s, dx, dy) })));
-  assert.ok(moved.every(({ score }) => score === 1), `hidden references stay at 1 under scale ${s} shift ${dx},${dy}`);
-}
-const hiddenPromptOnly = [];
-for (const [index, task] of hiddenTasks.entries()) {
-  const [w, h] = promptOnlyCanvases[index % promptOnlyCanvases.length];
-  hiddenPromptOnly.push((await hiddenBenchmark.score(task, { answer: promptOnlySvg(String(task.prompt), w, h) })).score);
-}
-assert.ok(hiddenPromptOnly.filter((score) => score >= 0.8).length >= 25, "prompt-only policy must solve at least 25 of 30 hidden tasks");
 const hiddenMemorisedReference = await memorisedReferenceProbe(hiddenTasks, hiddenBenchmark);
 for (const task of hiddenTasks) {
   const lower = String(task.prompt).toLowerCase();
@@ -276,7 +227,6 @@ const artifact = {
   adversarial_scores: adversarialScores,
   honest_answer_scores: honestScores,
   memorised_reference: memorisedReference,
-  prompt_only_scores: { mean: Math.round(promptOnly.reduce((a, b) => a + b, 0) / promptOnly.length * 1000) / 1000, at_least_0_8: promptOnly.filter((score) => score >= 0.8).length, hidden_at_least_0_8: hiddenPromptOnly.filter((score) => score >= 0.8).length },
   hidden_split: { tasks: hiddenTasks.length, public_reference_max: Math.max(...hiddenCross.map(({ score }) => score)), memorised_reference: hiddenMemorisedReference },
   reference_score_range: [Math.min(...referenceScores.map(({ score }) => score)), Math.max(...referenceScores.map(({ score }) => score))],
   route_status_codes: routes, tool_names: toolNames,

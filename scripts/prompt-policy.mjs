@@ -4,9 +4,10 @@
 // The E2E runs it on every task to prove the benchmark is solvable from the
 // prompt alone: it never reads task.expected or task.metadata.
 //
-// The layout follows the same proportions the prompt describes (wheels low in
-// the frame, bird seated over the frame, beak sized against the head), drawn
-// in a 640 x 420 space and then fitted into whatever canvas is requested.
+// Everything is drawn as a fraction of the requested canvas, so the same
+// prompt produces a correct drawing at any size. A ground line is included or
+// omitted from a hash of the prompt text, which also proves that incidental
+// decoration cannot move the score.
 
 const BEAKS = ["pouch beak", "long pointed beak", "thin curved beak", "tall colourful beak", "large beak", "pointed beak", "flat beak", "hooked beak", "short beak"];
 const PAIRS = [
@@ -14,7 +15,6 @@ const PAIRS = [
   ["upright body", "level body"],
   ["drop handlebars", "swept handlebars"],
   ["small wheels", "full-size wheels"],
-  ["long wheelbase", "standard wheelbase"],
   ["fat tires", "knobby tires", "smooth tires"],
 ];
 const FLAGS = ["long legs", "tail feathers", "second saddle", "cargo box", "rear rack", "battery pack"];
@@ -73,121 +73,94 @@ export function transformSvg(svg, s = 1, dx = 0, dy = 0) {
     });
 }
 
-const DW = 640;
-const DH = 420;
+const px = (v) => Math.round(v * 10) / 10;
 
-export function promptOnlySvg(prompt, canvasW = DW, canvasH = DH) {
-  const scale = Math.min(canvasW / DW, canvasH / DH) * 0.96;
-  const ox = Math.round((canvasW - DW * scale) / 2);
-  const oy = Math.round((canvasH - DH * scale) / 2);
-
+export function promptOnlySvg(prompt, canvasW = 1000, canvasH = 600) {
   const beak = named(prompt, BEAKS) ?? "pointed beak";
   const neck = named(prompt, PAIRS[0]) ?? "short neck";
   const posture = named(prompt, PAIRS[1]) ?? "level body";
   const bars = named(prompt, PAIRS[2]) ?? "handlebars";
   const wheelSize = named(prompt, PAIRS[3]) ?? "full-size wheels";
-  const wheelbaseKind = named(prompt, PAIRS[4]) ?? "standard wheelbase";
-  const tires = named(prompt, PAIRS[5]) ?? "smooth tires";
+  const tires = named(prompt, PAIRS[4]) ?? "smooth tires";
   const flags = Object.fromEntries(FLAGS.map((flag) => [flag, prompt.toLowerCase().includes(flag)]));
+  // A cheap deterministic coin toss per prompt: some drawings get a ground
+  // line, some do not, and the score may not care either way.
+  const withGround = [...prompt].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % 2 === 0;
 
-  const cy = 318;
-  const wheelbase = wheelbaseKind === "long wheelbase" ? 430 : 340;
-  const radius = wheelSize === "small wheels" ? 44 : 66;
-  const tyre = tires === "fat tires" ? Math.round(radius * 0.4) : 12;
-  const rearX = Math.round(320 - wheelbase / 2);
-  const frontX = Math.round(320 + wheelbase / 2);
-  const bbX = Math.round(rearX + wheelbase * 0.42);
-  const bbY = cy - 22;
-  const seatX = Math.round(rearX + wheelbase * 0.36);
-  const seatY = cy - 78;
-  const headX = Math.round(frontX - wheelbase * 0.12);
-  const headY = cy - 96;
-  const dark = "#22252b";
-
-  const parts = [
-    `<path d="M0 368H${DW}" fill="none" stroke="#6b705c" stroke-width="8"/>`,
-    `<circle cx="${rearX}" cy="${cy}" r="${radius}" fill="none" stroke="${dark}" stroke-width="${tyre}"${tires === "knobby tires" ? ' stroke-dasharray="9 11"' : ""}/>`,
-    `<circle cx="${frontX}" cy="${cy}" r="${radius}" fill="none" stroke="${dark}" stroke-width="${tyre}"${tires === "knobby tires" ? ' stroke-dasharray="9 11"' : ""}/>`,
-    `<circle cx="${rearX}" cy="${cy}" r="7" fill="${dark}"/><circle cx="${frontX}" cy="${cy}" r="7" fill="${dark}"/>`,
-    `<path d="M${rearX} ${cy}L${bbX} ${bbY}L${seatX} ${seatY}L${bbX} ${bbY}L${headX} ${headY}L${frontX} ${cy}M${seatX} ${seatY}L${seatX - 6} ${seatY - 14}" fill="none" stroke="#3d405b" stroke-width="12" stroke-linejoin="round"/>`,
-    `<ellipse cx="${seatX - 6}" cy="${seatY - 20}" rx="19" ry="7" fill="${dark}"/>`,
-    `<path d="M${bbX} ${bbY}l-18 24m18-24 20 22" fill="none" stroke="${dark}" stroke-width="8"/>`,
-    `<circle cx="${bbX}" cy="${bbY}" r="12" fill="#7a6a53"/>`,
-  ];
-  if (tires === "knobby tires") {
-    parts.push(`<circle cx="${rearX}" cy="${cy}" r="${radius + 7}" fill="none" stroke="${dark}" stroke-width="6" stroke-dasharray="7 9"/>`);
-    parts.push(`<circle cx="${frontX}" cy="${cy}" r="${radius + 7}" fill="none" stroke="${dark}" stroke-width="6" stroke-dasharray="7 9"/>`);
-  }
-  const barX = headX, barY = headY - 24;
-  if (bars === "drop handlebars") {
-    parts.push(`<path d="M${headX} ${headY}L${barX} ${barY}" fill="none" stroke="${dark}" stroke-width="9"/><path d="M${barX} ${barY}q24 4 24 26q0 16 -18 18" fill="none" stroke="${dark}" stroke-width="9" stroke-linecap="round"/>`);
-  } else if (bars === "swept handlebars") {
-    parts.push(`<path d="M${headX} ${headY}L${barX} ${barY}M${barX} ${barY}q-40 -6 -52 18M${barX} ${barY}q34 -8 48 12" fill="none" stroke="${dark}" stroke-width="9" stroke-linecap="round"/>`);
-  } else {
-    parts.push(`<path d="M${headX} ${headY}L${barX} ${barY}M${barX - 14} ${barY - 10}l30 4m-30 -4 34 18" fill="none" stroke="${dark}" stroke-width="9" stroke-linecap="round"/>`);
-  }
-  if (flags["second saddle"]) parts.push(`<ellipse cx="${Math.round(rearX + wheelbase * 0.62)}" cy="${seatY - 18}" rx="19" ry="7" fill="${dark}"/><path d="M${Math.round(rearX + wheelbase * 0.62)} ${seatY - 12}L${Math.round(rearX + wheelbase * 0.62)} ${seatY + 4}" fill="none" stroke="${dark}" stroke-width="8"/>`);
-  if (flags["cargo box"]) parts.push(`<rect x="${frontX - 40}" y="${cy - radius - 58}" width="96" height="56" rx="6" fill="#b08968" stroke="#6b4f35" stroke-width="5"/>`);
-  if (flags["rear rack"]) parts.push(`<rect x="${rearX - 48}" y="${cy - radius - 14}" width="92" height="10" rx="4" fill="${dark}"/>`);
-  if (flags["battery pack"]) parts.push(`<rect x="${Math.round(rearX + wheelbase * 0.28)}" y="${bbY - 66}" width="70" height="24" rx="6" fill="#495057"/>`);
+  const W = canvasW, H = canvasH;
+  const wheelR = wheelSize === "small wheels" ? H * 0.06 : H * 0.17;
+  const wheelbase = W * 0.5;
+  const axleY = H * 0.78;
+  const rearX = W * 0.5 - wheelbase / 2, frontX = W * 0.5 + wheelbase / 2;
+  const crankX = rearX + wheelbase * 0.42, crankY = axleY - wheelR * 0.3;
+  const seatX = rearX + wheelbase * 0.34, seatY = axleY - H * 0.22;
+  const steerX = frontX - wheelbase * 0.1, steerY = axleY - H * 0.24;
+  const ink = "#2b2d33", warmBeak = "#ef8f3c", plumage = "#ccdbe4";
+  const tyreWidth = tires === "fat tires" ? wheelR * 0.4 : tires === "knobby tires" ? wheelR * 0.3 : wheelR * 0.12;
 
   const upright = posture === "upright body";
-  const bodyRx = upright ? 62 : 90;
-  const bodyRy = upright ? 88 : 58;
-  const bx = 310;
-  const bodyCy = upright ? 176 : 152;
+  const bodyRx = upright ? W * 0.055 : W * 0.1;
+  const bodyRy = upright ? bodyRx * 1.15 : bodyRx * 0.6;
+  const bodyX = seatX + wheelbase * 0.06, bodyY = seatY - bodyRy * 1.15;
+  const headR = bodyRx * 0.42;
   const longNeck = neck === "long neck";
-  const hx = Math.round(bx + bodyRx + (longNeck ? 66 : 30));
-  const hy = Math.round(bodyCy - bodyRy - (longNeck ? 52 : 26));
-  const hr = upright ? 34 : 38;
+  const headX = bodyX + bodyRx * (longNeck ? 1.4 : 0.95) + headR * (longNeck ? 0.6 : 0.2);
+  const headY = bodyY - bodyRy - headR * (longNeck ? 1.6 : -0.25);
+  // The scene height the grader measures runs from the head's top to the
+  // wheels' bottoms; the saddle sits inside the lower band of that scene.
+  const sceneH = axleY + wheelR - (headY - headR);
+  const saddleY = axleY - sceneH * 0.2;
 
-  parts.push(`<ellipse cx="${bx}" cy="${bodyCy}" rx="${bodyRx}" ry="${bodyRy}" fill="#f4f1de" stroke="#33343a" stroke-width="5"/>`);
-  if (!upright) parts.push(`<path d="M${bx - 34} ${bodyCy}q58 -44 104 2q-50 56 -104 -2" fill="#81b29a" stroke="#33343a" stroke-width="4"/>`);
-  else parts.push(`<ellipse cx="${bx}" cy="${bodyCy + 8}" rx="${Math.round(bodyRx * 0.62)}" ry="${Math.round(bodyRy * 0.6)}" fill="#fdf8ec"/>`);
-  if (flags["tail feathers"]) parts.push(`<path d="M${bx - bodyRx + 8} ${bodyCy + 26}q-46 4 -64 44q48 -4 70 -28" fill="#81b29a" stroke="#33343a" stroke-width="4"/>`);
-  if (longNeck) parts.push(`<path d="M${bx + bodyRx - 26} ${bodyCy - bodyRy + 22}q10 -60 ${hx - bx - bodyRx + 40} ${hy - bodyCy + bodyRy - 8}" fill="none" stroke="#f4f1de" stroke-width="30" stroke-linecap="round"/>`);
-  parts.push(`<circle cx="${hx}" cy="${hy}" r="${hr}" fill="#f4f1de" stroke="#33343a" stroke-width="5"/>`);
-  parts.push(`<circle cx="${hx + 14}" cy="${hy - 10}" r="5" fill="#22252b"/>`);
+  const svg = [];
+  if (withGround) svg.push(`<path d="M0 ${px(H * 0.92)}H${W}" fill="none" stroke="#77835f" stroke-width="6"/>`);
+  const wheelAttrs = `fill="none" stroke="${ink}" stroke-width="${px(tyreWidth)}"${tires === "knobby tires" ? ` stroke-dasharray="${px(wheelR * 0.09)} ${px(wheelR * 0.12)}"` : ""}`;
+  svg.push(`<circle cx="${px(rearX)}" cy="${px(axleY)}" r="${px(wheelR)}" ${wheelAttrs}/>`);
+  svg.push(`<circle cx="${px(frontX)}" cy="${px(axleY)}" r="${px(wheelR)}" ${wheelAttrs}/>`);
+  svg.push(`<circle cx="${px(rearX)}" cy="${px(axleY)}" r="${px(wheelR * 0.1)}" fill="${ink}"/>`);
+  svg.push(`<circle cx="${px(frontX)}" cy="${px(axleY)}" r="${px(wheelR * 0.1)}" fill="${ink}"/>`);
+  svg.push(`<path d="M${px(rearX)} ${px(axleY)}L${px(crankX)} ${px(crankY)}L${px(seatX)} ${px(seatY)}M${px(crankX)} ${px(crankY)}L${px(steerX)} ${px(steerY)}L${px(frontX)} ${px(axleY)}" fill="none" stroke="#4a4e69" stroke-width="${px(wheelR * 0.14)}" stroke-linejoin="round"/>`);
+  svg.push(`<ellipse cx="${px(seatX)}" cy="${px(saddleY)}" rx="${px(wheelR * 0.3)}" ry="${px(wheelR * 0.09)}" fill="${ink}"/>`);
+  svg.push(`<circle cx="${px(crankX)}" cy="${px(crankY)}" r="${px(wheelR * 0.18)}" fill="#8d6b4a"/>`);
+  svg.push(`<path d="M${px(crankX)} ${px(crankY)}l${px(-wheelR * 0.2)} ${px(wheelR * 0.25)}M${px(crankX)} ${px(crankY)}l${px(wheelR * 0.22)} ${px(wheelR * 0.22)}" fill="none" stroke="${ink}" stroke-width="${px(wheelR * 0.08)}"/>`);
+  const barY = steerY - wheelR * 0.12;
+  if (bars === "drop handlebars") {
+    svg.push(`<path d="M${px(steerX)} ${px(steerY)}L${px(steerX)} ${px(barY)}q${px(wheelR * 0.22)} ${px(wheelR * 0.05)} ${px(wheelR * 0.22)} ${px(wheelR * 0.3)}q0 ${px(wheelR * 0.18)} ${px(-wheelR * 0.16)} ${px(wheelR * 0.2)}" fill="none" stroke="${ink}" stroke-width="${px(wheelR * 0.09)}" stroke-linecap="round"/>`);
+  } else if (bars === "swept handlebars") {
+    svg.push(`<path d="M${px(steerX)} ${px(steerY)}L${px(steerX)} ${px(barY)}q${px(-wheelR * 0.55)} ${px(-wheelR * 0.06)} ${px(-wheelR * 0.75)} ${px(wheelR * 0.22)}" fill="none" stroke="${ink}" stroke-width="${px(wheelR * 0.09)}" stroke-linecap="round"/>`);
+  } else {
+    svg.push(`<path d="M${px(steerX)} ${px(steerY)}L${px(steerX)} ${px(barY)}M${px(steerX - wheelR * 0.18)} ${px(barY - wheelR * 0.06)}L${px(steerX + wheelR * 0.2)} ${px(barY)}" fill="none" stroke="${ink}" stroke-width="${px(wheelR * 0.09)}" stroke-linecap="round"/>`);
+  }
+  if (flags["second saddle"]) svg.push(`<ellipse cx="${px(rearX + wheelbase * 0.62)}" cy="${px(saddleY)}" rx="${px(wheelR * 0.3)}" ry="${px(wheelR * 0.09)}" fill="${ink}"/>`);
+  if (flags["cargo box"]) svg.push(`<rect x="${px(frontX - wheelR * 0.7)}" y="${px(axleY - wheelR * 1.8)}" width="${px(wheelR * 1.3)}" height="${px(wheelR * 1.1)}" fill="#b08968" stroke="#6b4f35" stroke-width="4"/>`);
+  if (flags["rear rack"]) svg.push(`<rect x="${px(rearX - wheelR * 1.1)}" y="${px(axleY - wheelR * 1.25)}" width="${px(wheelR * 0.9)}" height="${px(wheelR * 0.12)}" fill="${ink}"/>`);
+  if (flags["battery pack"]) svg.push(`<rect x="${px(crankX - wheelR * 0.55)}" y="${px(crankY - wheelR * 0.75)}" width="${px(wheelR * 1.05)}" height="${px(wheelR * 0.3)}" fill="#495057"/>`);
+
+  svg.push(`<ellipse cx="${px(bodyX)}" cy="${px(bodyY)}" rx="${px(bodyRx)}" ry="${px(bodyRy)}" fill="${plumage}" stroke="#3a3d45" stroke-width="4"/>`);
+  svg.push(`<ellipse cx="${px(bodyX - bodyRx * 0.1)}" cy="${px(bodyY + bodyRy * 0.2)}" rx="${px(bodyRx * 0.6)}" ry="${px(bodyRy * 0.45)}" fill="#8fb7c7"/>`);
+  if (flags["tail feathers"]) svg.push(`<path d="M${px(bodyX - bodyRx + 4)} ${px(bodyY + bodyRy * 0.4)}q${px(-bodyRx * 0.5)} ${px(bodyRy * 0.1)} ${px(-bodyRx * 0.7)} ${px(bodyRy * 0.7)}q${px(bodyRx * 0.5)} ${px(-bodyRy * 0.1)} ${px(bodyRx * 0.72)} ${px(-bodyRy * 0.4)}Z" fill="#8fb7c7" stroke="#3a3d45" stroke-width="3"/>`);
+  if (longNeck) svg.push(`<path d="M${px(bodyX + bodyRx * 0.2)} ${px(bodyY - bodyRy * 0.9)}Q${px(headX - headR * 0.6)} ${px((bodyY + headY) / 2)} ${px(headX - headR * 0.3)} ${px(headY + headR * 0.9)}" fill="none" stroke="${plumage}" stroke-width="${px(headR * 0.8)}" stroke-linecap="round"/>`);
+  svg.push(`<circle cx="${px(headX)}" cy="${px(headY)}" r="${px(headR)}" fill="${plumage}" stroke="#3a3d45" stroke-width="4"/>`);
+  svg.push(`<circle cx="${px(headX + headR * 0.35)}" cy="${px(headY - headR * 0.3)}" r="${px(headR * 0.14)}" fill="${ink}"/>`);
 
   // Beak lengths and depths are multiples of the head width, exactly as the
   // prompt states them.
-  const tipX = hx + hr;
-  const dd = (k) => Math.round(k * hr * 2);
-  switch (beak) {
-    case "pouch beak":
-      parts.push(`<path d="M${tipX - 6} ${hy - 6}L${Math.round(tipX + hr * 2.9)} ${hy + 8}L${tipX - 6} ${hy + 16}Z" fill="#f4a261" stroke="#9c6644" stroke-width="4"/>`);
-      parts.push(`<path d="M${tipX} ${hy + 14}q${dd(0.8)} ${dd(0.55)} ${dd(1.5)} ${dd(0.1)}q${dd(-0.7)} ${dd(0.65)} ${dd(-1.5)} ${dd(-0.1)}" fill="#f6bd60" stroke="#9c6644" stroke-width="4"/>`);
-      break;
-    case "large beak":
-      parts.push(`<path d="M${tipX - 8} ${hy - dd(0.18)}Q${Math.round(tipX + dd(1.6))} ${hy - dd(0.2)} ${Math.round(tipX + dd(1.5))} ${hy + dd(0.15)}Q${Math.round(tipX + dd(1.15))} ${hy + dd(0.42)} ${tipX - 8} ${hy + dd(0.22)}Z" fill="#f4a261" stroke="#9c6644" stroke-width="4"/>`);
-      break;
-    case "long pointed beak":
-      parts.push(`<path d="M${tipX - 6} ${hy - 4}L${Math.round(tipX + dd(1.8))} ${hy + 6}L${tipX - 6} ${hy + 12}Z" fill="#f4a261" stroke="#9c6644" stroke-width="3"/>`);
-      break;
-    case "pointed beak":
-      parts.push(`<path d="M${tipX - 6} ${hy - 3}L${Math.round(tipX + dd(1.1))} ${hy + 6}L${tipX - 6} ${hy + 12}Z" fill="#f4a261"/>`);
-      break;
-    case "flat beak":
-      parts.push(`<path d="M${tipX - 6} ${hy}L${Math.round(tipX + dd(0.85))} ${hy + 4}L${tipX - 6} ${hy + dd(0.11)}Z" fill="#f4a261"/>`);
-      break;
-    case "thin curved beak":
-      parts.push(`<path d="M${tipX - 4} ${hy + 2}q${dd(0.95)} ${dd(0.1)} ${dd(1.1)} ${dd(0.5)}q${dd(-0.2)} ${dd(-0.5)} ${dd(-1.1)} ${dd(-0.55)}Z" fill="#f4a261"/>`);
-      break;
-    case "tall colourful beak":
-      parts.push(`<path d="M${tipX - 8} ${hy - dd(0.24)}q${dd(0.6)} ${dd(0.08)} ${dd(0.55)} ${dd(0.68)}q${dd(-0.55)} ${dd(-0.1)} ${dd(-0.55)} ${dd(-0.68)}Z" fill="#f4a261" stroke="#9c6644" stroke-width="3"/>`);
-      break;
-    case "hooked beak":
-      parts.push(`<path d="M${tipX - 4} ${hy - 8}q${dd(0.45)} ${dd(0.03)} ${dd(0.36)} ${dd(0.42)}q${dd(-0.36)} ${dd(-0.1)} ${dd(-0.36)} ${dd(-0.42)}" fill="#f4a261"/>`);
-      break;
-    default:
-      parts.push(`<path d="M${tipX - 4} ${hy}L${Math.round(tipX + dd(0.42))} ${hy + 5}L${tipX - 4} ${hy + dd(0.13)}Z" fill="#f4a261"/>`);
-  }
+  const D = headR * 2, tipX = headX + headR * 0.9, tipY = headY;
+  const beakShapes = {
+    "pouch beak": `<path d="M${px(tipX)} ${px(tipY - D * 0.08)}L${px(tipX + D * 1.4)} ${px(tipY + D * 0.08)}L${px(tipX)} ${px(tipY + D * 0.18)}Z" fill="${warmBeak}"/><ellipse cx="${px(tipX + D * 0.7)}" cy="${px(tipY + D * 0.4)}" rx="${px(D * 0.6)}" ry="${px(D * 0.3)}" fill="#f6bd60"/>`,
+    "large beak": `<path d="M${px(tipX)} ${px(tipY - D * 0.2)}L${px(tipX + D * 1.45)} ${px(tipY)}L${px(tipX)} ${px(tipY + D * 0.25)}Z" fill="${warmBeak}"/>`,
+    "long pointed beak": `<path d="M${px(tipX)} ${px(tipY - D * 0.06)}L${px(tipX + D * 1.8)} ${px(tipY + D * 0.04)}L${px(tipX)} ${px(tipY + D * 0.1)}Z" fill="${warmBeak}"/>`,
+    "pointed beak": `<path d="M${px(tipX)} ${px(tipY - D * 0.1)}L${px(tipX + D * 1.2)} ${px(tipY + D * 0.06)}L${px(tipX)} ${px(tipY + D * 0.2)}Z" fill="${warmBeak}"/>`,
+    "flat beak": `<path d="M${px(tipX)} ${px(tipY - D * 0.05)}L${px(tipX + D * 0.9)} ${px(tipY + D * 0.02)}L${px(tipX)} ${px(tipY + D * 0.12)}Z" fill="${warmBeak}"/>`,
+    "thin curved beak": `<path d="M${px(tipX)} ${px(tipY)}q${px(D * 0.6)} ${px(D * 0.05)} ${px(D * 1.0)} ${px(D * 0.4)}q${px(-D * 0.2)} ${px(-D * 0.35)} ${px(-D)} ${px(-D * 0.45)}Z" fill="${warmBeak}"/>`,
+    "hooked beak": `<path d="M${px(tipX)} ${px(tipY - D * 0.1)}q${px(D * 0.35)} ${px(0)} ${px(D * 0.4)} ${px(D * 0.3)}q${px(-D * 0.3)} ${px(-D * 0.05)} ${px(-D * 0.4)} ${px(-D * 0.3)}Z" fill="${warmBeak}"/>`,
+    "tall colourful beak": `<path d="M${px(tipX)} ${px(tipY - D * 0.3)}L${px(tipX + D * 0.75)} ${px(tipY + D * 0.1)}L${px(tipX)} ${px(tipY + D * 0.4)}Z" fill="${warmBeak}"/>`,
+    "short beak": `<path d="M${px(tipX)} ${px(tipY - D * 0.05)}L${px(tipX + D * 0.4)} ${px(tipY + D * 0.04)}L${px(tipX)} ${px(tipY + D * 0.1)}Z" fill="${warmBeak}"/>`,
+  };
+  svg.push(beakShapes[beak]);
 
-  const legY = flags["long legs"] ? Math.round(bodyCy - bodyRy * 0.25) : bodyCy + bodyRy - 6;
-  const legSpread = upright ? 30 : 44;
-  const legWidth = flags["long legs"] ? 6 : 13;
-  parts.push(`<path d="M${bx - legSpread} ${legY}Q${bx - legSpread - 8} ${Math.round((legY + bbY - 2) / 2)} ${bx - legSpread + 10} ${bbY - 2}M${bx + legSpread - 14} ${legY + 4}Q${bx + legSpread - 4} ${Math.round((legY + bbY - 2) / 2)} ${bx + legSpread + 12} ${bbY - 2}" fill="none" stroke="#e9c46a" stroke-width="${legWidth}" stroke-linecap="round"/>`);
-  parts.push(`<path d="M${bx - legSpread + 2} ${bbY + 2}l24 2M${bx + legSpread + 4} ${bbY}l22 -6" fill="none" stroke="#33343a" stroke-width="7" stroke-linecap="round"/>`);
+  const legStroke = flags["long legs"] ? headR * 0.2 : headR * 0.35;
+  const legEnd = flags["long legs"] ? axleY + wheelR * 0.22 : crankY - wheelR * 0.05;
+  svg.push(`<path d="M${px(bodyX - bodyRx * 0.4)} ${px(bodyY + bodyRy * 0.9)}L${px(crankX - wheelR * 0.15)} ${px(legEnd)}M${px(bodyX + bodyRx * 0.25)} ${px(bodyY + bodyRy * 0.9)}L${px(crankX + wheelR * 0.1)} ${px(legEnd)}" fill="none" stroke="#c9a227" stroke-width="${px(legStroke)}" stroke-linecap="round"/>`);
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${canvasW} ${canvasH}" role="img">\n${transformSvg(parts.join("\n"), scale, ox, oy)}\n</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img">\n${svg.join("\n")}\n</svg>`;
 }

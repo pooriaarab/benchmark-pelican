@@ -265,6 +265,10 @@ const WEIGHTS: Record<string, number> = {
 const BASE_CHECKS: Array<[string, number]> = [["svg canvas", 0.05], ["complexity", 0.08], ["coverage", 0.02]];
 const DEFAULT_PARTS = ["svg root", "two wheels", "bicycle frame", "handlebars", "pedals", "bird body", "bird head", "beak", "legs reaching the pedals"];
 
+export function safeSvg(answer: string): string | undefined {
+  return typeof scan(answer) === "string" ? undefined : extract(answer);
+}
+
 export function gradeSvg(answer: unknown, task?: Task): TaskScore {
   if (typeof answer !== "string" || answer.trim() === "") return { score: 0, reason: "No SVG answer was provided." };
   const scanned = scan(answer);

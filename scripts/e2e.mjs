@@ -151,16 +151,19 @@ for (const [s, dx, dy] of [[0.6, 0, 0], [0.85, 0, 0], [1.08, 0, 0], [1.3, 0, 0],
 const referenceMean = referenceScores.reduce((a, { score }) => a + score, 0) / referenceScores.length;
 for (const strategy of weakAnswers) assert.ok(adversarialScores[strategy.name] < referenceMean - 0.5, `${strategy.name} must be well below the reference policy`);
 
-// A model sees only the prompt text, so two policies exercise the prompts.
-// The independent literal-number policy (scripts/literal-policy.mjs) draws
-// exactly the numbers each prompt states — a tail 0.42-0.5R tall where the
-// prompt says "taller than 0.4 times the wheel radius", pedals on the axle
-// line — with its own layout and seeded jitter; its range is what the docs
-// cite. The builder's tuned prompt-only policy (scripts/prompt-policy.mjs) is
-// kept only as a smoke test that a careful prompt-reader can pass.
-// Measured 2026-10-16: the literal policy scores a mean of 1.000 with 30/30
-// at 0.8 or above on the public split and on held-out test seeds 7, 99 and
-// 4242; the bound below is that measured minimum minus a margin of five.
+// A model sees only the prompt text, so two builder policies exercise the
+// prompts. The literal-number policy (scripts/literal-policy.mjs — the
+// builder's smoke policy; not independent evidence) draws exactly the
+// numbers each prompt states — a tail 0.42-0.5R tall where the prompt says
+// "taller than 0.4 times the wheel radius", pedals on the axle line — with
+// its own layout and seeded jitter. The tuned prompt-only policy
+// (scripts/prompt-policy.mjs) is a second smoke test that a careful
+// prompt-reader can pass. The independent evidence is the reviewer's policy
+// whose measured ranges the docs cite.
+// Measured 2026-10-16 after the beak and cargo-box fixes: the builder's
+// literal policy scores a mean of 1.000 with 30/30 at 0.8 or above on the
+// public split and on held-out test seeds 7, 99 and 4242; the bound below is
+// that measured minimum minus a margin of five.
 const PROMPT_ONLY_MIN = 25;
 const LITERAL_MIN = 25;
 const promptOnlyCanvases = [[1000, 600], [640, 480]];
@@ -253,16 +256,13 @@ for (const [name, markup] of painted) {
   const { score } = await benchmark.score(tasks[0], { answer: canonical.replace(beakPaths[0], markup) });
   assert.equal(score, 1, `beak painted via ${name} must still score 1`);
 }
-// A beak may also be a stroked warm curve with a stroke at least 0.06 wheel
-// radii wide; a hairline warm outline is too thin to read as a beak.
-const strokedBeak = beakPaths[0]
+// A beak must be a filled warm shape: a stroke-only orange curve — even a
+// thick one — is not read as a beak, so the score caps at "no bird with a
+// beak".
+const strokeOnlyBeak = beakPaths[0]
   .replaceAll(/ fill="#[0-9a-f]+"/g, ' fill="none"')
   .replaceAll('stroke="#9c6644" stroke-width="4"', 'stroke="#f4a261" stroke-width="8"');
-assert.equal((await benchmark.score(tasks[0], { answer: canonical.replace(beakPaths[0], strokedBeak) })).score, 1, "a stroked warm beak must still score 1");
-const hairlineBeak = beakPaths[0]
-  .replaceAll(/ fill="#[0-9a-f]+"/g, ' fill="none"')
-  .replaceAll('stroke="#9c6644" stroke-width="4"', 'stroke="#f4a261" stroke-width="2"');
-assert.ok((await benchmark.score(tasks[0], { answer: canonical.replace(beakPaths[0], hairlineBeak) })).score <= 0.2, "a hairline beak outline must not read as a beak");
+assert.ok((await benchmark.score(tasks[0], { answer: canonical.replace(beakPaths[0], strokeOnlyBeak) })).score <= 0.2, "a stroke-only orange curve must not read as a beak");
 for (const hostile of [
   `<svg viewBox="0 0 100 100"><style>@import "https://bad.invalid/x"</style><rect width="10" height="10"/></svg>`,
   `<svg viewBox="0 0 100 100"><style>.a{fill:url(https://bad.invalid/x)}</style><rect class="a" width="10" height="10"/></svg>`,
@@ -342,6 +342,51 @@ for (const [label, bench, list] of [["public", benchmark, tasks], ...[7, 99, 424
     }
   }
 }
+// A filled polygon beak is a beak, never a cargo box: on the small-wheel
+// vehicles (BMX and folding bicycles) the beak zone sits right over the front
+// hub, where a warm polygon once read as a box. A straight beak path becomes
+// a polygon verbatim; a curved path keeps its markup and gains a polygon
+// over its anchor points — inside its own bounds, so the beak style cannot
+// move. Every BMX and folding task must still score exactly 1.
+function pathAnchors(d) {
+  const tokens = d.match(/[a-zA-Z]|-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/g) ?? [];
+  const arity = { M: 2, L: 2, T: 2, H: 1, V: 1, C: 6, S: 4, Q: 4, A: 7, Z: 0 };
+  const points = [];
+  let command = "", x = 0, y = 0, index = 0;
+  while (index < tokens.length) {
+    if (/[a-zA-Z]/.test(tokens[index])) { command = tokens[index]; index++; continue; }
+    const name = command.toUpperCase(), count = arity[name], relative = command === command.toLowerCase();
+    if (count === undefined) return points;
+    const values = tokens.slice(index, index + count).map(Number);
+    index += count;
+    if (name === "H") x = relative ? x + values[0] : values[0];
+    else if (name === "V") y = relative ? y + values[0] : values[0];
+    else if (name === "A") { x = relative ? x + values[5] : values[5]; y = relative ? y + values[6] : values[6]; }
+    else if (count >= 2) { x = relative ? x + values[count - 2] : values[count - 2]; y = relative ? y + values[count - 1] : values[count - 1]; }
+    points.push(`${Math.round(x * 10) / 10},${Math.round(y * 10) / 10}`);
+  }
+  return points;
+}
+const beakBlock = /(<circle[^>]*r="5" fill="#22252b"[^>]*\/>)(\s*(?:<path d="M[^"]+"[^>]*\/>\s*)+)/;
+let polygonBeakProbes = 0;
+for (const [label, bench, list] of [["public", benchmark, tasks], ...[...hiddenSuites.entries()].map(([seed, suite]) => [`hidden_seed_${seed}`, suite.bench, suite.tasks])]) {
+  for (const task of list.filter((item) => item.metadata?.vehicle === "BMX bike" || item.metadata?.vehicle === "folding bicycle")) {
+    const expected = String(task.expected), block = expected.match(beakBlock);
+    assert.ok(block, `${label}:${task.id} reference must carry the eye and beak block`);
+    const overlays = [];
+    const polygoned = block[2].replace(/<path d="(M[^"]+)"([^>]*)\/>/g, (whole, d, attrs) => {
+      const anchors = pathAnchors(d).join(" ");
+      assert.ok(anchors.length > 0, `${label}:${task.id} beak path needs anchors`);
+      if (!/[qcsat]/i.test(d)) return `<polygon points="${anchors}"${attrs}/>`;
+      const fill = (String(attrs).match(/fill="([^"]*)"/) ?? [])[1] ?? "#f4a261";
+      overlays.push(`<polygon points="${anchors}" fill="${fill}"/>`);
+      return whole;
+    });
+    const { score } = await bench.score(task, { answer: expected.replace(beakBlock, `${block[1]}${polygoned}${overlays.join("")}`) });
+    assert.equal(score, 1, `${label}:${task.id} must score 1 with a filled polygon beak, got ${score}`);
+    polygonBeakProbes += 1;
+  }
+}
 for (const [s, dx, dy] of [[0.8, 0, 0], [1.25, 0, 0], [1, 30, -15]]) {
   const moved = await Promise.all(hiddenTasks.map((task) => hiddenBenchmark.score(task, { answer: transformSvg(String(task.expected), s, dx, dy) })));
   assert.ok(moved.every(({ score }) => score === 1), `hidden references stay at 1 under scale ${s} shift ${dx},${dy}`);
@@ -415,6 +460,15 @@ try {
   assert.ok(mcpRunReport.rows.length === 30 && mcpRunReport.rows.some((row) => row.details?.length > 0), "MCP report rows must carry per-check details");
 } finally { await client.close(); }
 
+// The shipped public file must equal the generator output: rerun the
+// documented command and fail loudly on the first differing task id.
+await execFile(process.execPath, ["scripts/gen-tasks.mjs", "--output", "artifacts/tasks.public-check.jsonl"]);
+const shippedLines = (await readFile("data/tasks.jsonl", "utf8")).trim().split("\n");
+const regenLines = (await readFile("artifacts/tasks.public-check.jsonl", "utf8")).trim().split("\n");
+assert.equal(shippedLines.length, regenLines.length, `shipped tasks.jsonl holds ${shippedLines.length} tasks, generator writes ${regenLines.length}`);
+const drift = shippedLines.findIndex((line, index) => line !== regenLines[index]);
+assert.equal(drift, -1, `data/tasks.jsonl differs from generator output starting at task ${drift === -1 ? "n/a" : JSON.parse(shippedLines[drift]).id}`);
+
 const artifact = {
   task_count: report.rows.length, scores: report.rows.map((row) => row.score),
   adversarial_scores: adversarialScores,
@@ -423,6 +477,7 @@ const artifact = {
   prompt_only_scores: promptOnlyScores,
   literal_policy_scores: literalScores,
   tail_sweep: tailSweep,
+  polygon_beak_probes: polygonBeakProbes,
   canvas_width_invariance: canvasRows,
   decoration_sweep: { probes: sweepTotal, changed: sweepChanged },
   hidden_split: { tasks: hiddenTasks.length, reference_perfect_seeds: hiddenSeeds.length, public_reference_max: Math.max(...hiddenCross.map(({ score }) => score)), memorised_reference: hiddenMemorisedReference },

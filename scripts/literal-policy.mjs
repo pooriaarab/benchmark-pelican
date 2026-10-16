@@ -1,10 +1,10 @@
-// Literal-number policy — the independent evidence cited in the docs. Reads
-// ONLY the task prompt text and draws exactly the numbers it states, at face
-// value plus a small seeded slack: a tail the prompt calls "taller than 0.4
-// times the wheel radius" is drawn 0.42-0.5R tall, pedals sit on the axle
-// line, tire strokes sit just over their stated minimums. It never reads
-// task.expected or task.metadata and shares no code, colours, or layout
-// constants with the generator or prompt-policy.mjs.
+// Literal-number policy — the builder's smoke policy; not independent
+// evidence. Reads ONLY the task prompt text and draws exactly the numbers it
+// states, at face value plus a small seeded slack: a tail the prompt calls
+// "taller than 0.4 times the wheel radius" is drawn 0.42-0.5R tall, pedals
+// sit on the axle line, tire strokes sit just over their stated minimums. It
+// never reads task.expected or task.metadata and shares no code, colours, or
+// layout constants with the generator or prompt-policy.mjs.
 
 const BEAK_STYLES = ["pouch beak", "long pointed beak", "thin curved beak", "tall colourful beak", "large beak", "pointed beak", "flat beak", "hooked beak", "short beak"];
 const PICKS = [["long neck", "short neck"], ["upright body", "level body"], ["drop handlebars", "swept handlebars"], ["small wheels", "full-size wheels"], ["fat tires", "knobby tires", "smooth tires"]];

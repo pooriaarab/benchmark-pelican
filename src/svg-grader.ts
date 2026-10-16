@@ -14,6 +14,7 @@ interface Round { element: Element; bounds: Bounds; cx: number; cy: number; rx: 
 interface Scene {
   extent: Bounds; width: number; height: number; geometry: { element: Element; bounds: Bounds }[];
   rounds: Round[]; stroked: { element: Element; bounds: Bounds }[];
+  sceneShapes: { element: Element; bounds: Bounds }[];
   wheels: [Round, Round] | undefined; frameTop: number;
 }
 
@@ -240,13 +241,14 @@ function scan(answer: string): { scene: Scene } | string {
     const ratio = Math.max(left.rx, right.rx) / Math.min(left.rx, right.rx);
     if (right.cx - left.cx > pw * 0.3 && ratio <= 1.35 && (!wheels || right.cx - left.cx > wheels[1].cx - wheels[0].cx)) wheels = [left, right];
   }
-  // The drawing's own extent is the bounding box of the bird-plus-vehicle
-  // figure only. A long thin horizontal stroke (a ground line or a horizon)
-  // is decoration, and so is any shape that does not touch that figure (a sun
-  // or a cloud in the corner): neither may stretch the extent and flip a
+  // The drawing's own extent is the bounding box of the connected
+  // bird-plus-vehicle figure only. A long thin horizontal stroke (a ground
+  // line or a horizon) is decoration, and so is a shape farther than one
+  // wheel diameter from the vehicle or the bird, or one that does not touch
+  // the figure at all: a sun or a cloud can come and go without moving a
   // check. Every geometric check below is measured against this extent or
-  // against named parts, never against the canvas or viewBox, so scaling or
-  // translating the scene changes nothing.
+  // against named parts inside the scene, never against the canvas or
+  // viewBox, so scaling or translating the scene changes nothing.
   const wheelSpan = wheels ? wheels[1].cx - wheels[0].cx : 0;
   const members = useful.filter((item) => {
     const w = item.bounds.maxX - item.bounds.minX, h = item.bounds.maxY - item.bounds.minY;
@@ -254,7 +256,23 @@ function scan(answer: string): { scene: Scene } | string {
   });
   let sceneShapes = members;
   if (wheels) {
-    const pad = Math.max(6, ph * 0.04);
+    const diameter = Math.max(wheels[0].rx, wheels[1].rx) * 2;
+    const pad = Math.max(2, diameter * 0.03);
+    const wheelRegion = {
+      minX: wheels[0].cx - wheels[0].rx, minY: Math.min(wheels[0].bounds.minY, wheels[1].bounds.minY),
+      maxX: wheels[1].cx + wheels[1].rx, maxY: Math.max(wheels[0].bounds.maxY, wheels[1].bounds.maxY),
+    };
+    // The bird anchor is the largest member round above the vehicle — the
+    // body wins it. A shape joins the figure only when it sits within one
+    // wheel diameter of the wheels or of that anchor AND touches what is
+    // already connected (the hairline pad covers anti-aliasing gaps). A sun
+    // or a cloud near the bird fails one test or the other, so decoration
+    // can never join the extent and flip a check.
+    const edgeGap = (a: Bounds, b: Bounds) => Math.max(0, Math.max(a.minX - b.maxX, b.minX - a.maxX, a.minY - b.maxY, b.minY - a.maxY));
+    const anchor = members
+      .filter((item) => (item.element.name === "circle" || item.element.name === "ellipse") && item.element !== wheels[0].element && item.element !== wheels[1].element && (item.bounds.minY + item.bounds.maxY) / 2 < wheelRegion.minY)
+      .reduce<{ element: Element; bounds: Bounds } | undefined>((best, item) => !best || span(item.bounds).w * span(item.bounds).h > span(best.bounds).w * span(best.bounds).h ? item : best, undefined);
+    const near = (b: Bounds) => edgeGap(b, wheelRegion) <= diameter || (anchor !== undefined && edgeGap(b, anchor.bounds) <= diameter);
     const inScene = new Set<number>();
     const queue: number[] = [];
     members.forEach((item, index) => {
@@ -264,7 +282,8 @@ function scan(answer: string): { scene: Scene } | string {
       const item = members[queue.pop()!]!;
       for (let index = 0; index < members.length; index++) {
         if (inScene.has(index)) continue;
-        if (overlap(item.bounds, members[index]!.bounds, pad)) { inScene.add(index); queue.push(index); }
+        const b = members[index]!.bounds;
+        if (near(b) && overlap(item.bounds, b, pad)) { inScene.add(index); queue.push(index); }
       }
     }
     sceneShapes = members.filter((_item, index) => inScene.has(index));
@@ -273,7 +292,7 @@ function scan(answer: string): { scene: Scene } | string {
     ? sceneShapes.reduce((all, item) => ({ minX: Math.min(all.minX, item.bounds.minX), minY: Math.min(all.minY, item.bounds.minY), maxX: Math.max(all.maxX, item.bounds.maxX), maxY: Math.max(all.maxY, item.bounds.maxY) }), { ...sceneShapes[0]!.bounds })
     : preliminary;
   const width = extent.maxX - extent.minX, height = extent.maxY - extent.minY;
-  return { scene: { extent, width, height, geometry, rounds, stroked, wheels, frameTop: wheels ? wheels[0].cy - height * 0.08 : extent.minY + height * 0.7 } };
+  return { scene: { extent, width, height, geometry, rounds, stroked, wheels, sceneShapes, frameTop: wheels ? wheels[0].cy - height * 0.08 : extent.minY + height * 0.7 } };
 }
 
 // Orange through yellow hues; cream and near-white fills do not count as a beak.
@@ -305,7 +324,14 @@ const overlap = (a: Bounds, b: Bounds, pad = 0) => a.minX <= b.maxX + pad && a.m
 const span = (b: Bounds) => ({ w: b.maxX - b.minX, h: b.maxY - b.minY });
 
 function sceneChecks(scene: Scene) {
-  const { extent, width, height, geometry, rounds, stroked, wheels } = scene;
+  const { extent, width, height, wheels } = scene;
+  // Part checks only see the connected figure: decoration that stays outside
+  // the scene — a sun, a cloud — cannot fake a part or poison one (a warm
+  // disc near the head must not join the beak union).
+  const member = new Set(scene.sceneShapes.map((item) => item.element));
+  const geometry = scene.geometry.filter((item) => member.has(item.element));
+  const rounds = scene.rounds.filter((item) => member.has(item.element));
+  const stroked = scene.stroked.filter((item) => member.has(item.element));
   const wheelbase = wheels ? wheels[1].cx - wheels[0].cx : width * 0.5;
   const between = (item: { bounds: Bounds }) => wheels && item.bounds.minX <= wheels[1].cx && item.bounds.maxX >= wheels[0].cx;
   const upper = (item: { bounds: Bounds }) => item.bounds.minY < extent.minY + height * 0.55;
@@ -313,9 +339,16 @@ function sceneChecks(scene: Scene) {
   // The body is the largest upper-region round, so a head circle cannot win.
   const body = bodies.reduce<Round | undefined>((best, round) => !best || round.rx * round.ry > best.rx * best.ry ? round : best, undefined);
   const head = body && rounds.find((round) => round !== body && round.rx >= width * 0.012 && round.rx <= Math.max(body.rx * 0.75, width * 0.02) && round.ry <= Math.max(body.ry * 0.9, height * 0.03) && round.cy < body.cy - Math.min(4, height * 0.01) && round.cx > body.cx - body.rx * 0.35 && round.cx < extent.maxX);
-  const warms = geometry.filter((item) => warm(item.element.paint.fill) && upper(item) && span(item.bounds).w > width * 0.02);
-  const headZone = head ? { minX: head.cx - head.rx * 0.4, minY: head.bounds.minY - head.rx, maxX: head.bounds.maxX + head.rx * 4, maxY: head.bounds.maxY + head.rx * 1.6 } : undefined;
-  const beaks = headZone ? warms.filter((item) => overlap(item.bounds, headZone)) : warms;
+  // Warm candidates come from the full geometry: a long beak can reach past
+  // the scene's distance rule and still be a beak. But a beak element must
+  // overlap the head it hangs from — a warm sun or cloud floating near the
+  // head never enters the beak union and cannot reclassify it. The only
+  // second hop is a pouch: warm geometry that overlaps an attached beak and
+  // hangs below the head's centre line.
+  const warms = scene.geometry.filter((item) => warm(item.element.paint.fill) && upper(item) && span(item.bounds).w > width * 0.02);
+  const headPad = head ? { minX: head.bounds.minX - head.rx * 0.2, minY: head.bounds.minY - head.rx * 0.2, maxX: head.bounds.maxX + head.rx * 0.2, maxY: head.bounds.maxY + head.rx * 0.2 } : undefined;
+  const attached = headPad ? warms.filter((item) => overlap(item.bounds, headPad)) : warms;
+  const beaks = head ? warms.filter((item) => attached.includes(item) || attached.some((other) => overlap(item.bounds, other.bounds) && item.bounds.minY > head.cy)) : attached;
   const pedalZone = wheels ? { minX: wheels[0].cx, minY: wheels[0].cy - height * 0.3, maxX: wheels[1].cx, maxY: wheels[0].cy } : undefined;
   const legReaches = (item: { bounds: Bounds }, zone: Bounds) => item.bounds.minY > extent.minY + height * 0.28 && item.bounds.minY < extent.minY + height * 0.72 && item.bounds.maxY >= zone.minY + height * 0.12 && item.bounds.maxY <= zone.maxY + height * 0.08 && item.bounds.maxX > zone.minX - width * 0.1 && item.bounds.minX < zone.maxX + width * 0.1;
   const legsToPedals = Boolean(pedalZone && (stroked.filter((item) => legReaches(item, pedalZone) && (span(item.bounds).h > height * 0.12 || span(item.bounds).w > width * 0.06)).length >= 2 || stroked.some((item) => legReaches(item, pedalZone) && span(item.bounds).h > height * 0.14)));
@@ -351,9 +384,11 @@ function sceneChecks(scene: Scene) {
   })();
   // Handlebars classify the same way: a drop curl wins, then a wide swept bar,
   // then a plain bar. Only one bar check can pass per drawing. The zone sits in
-  // the front half of the bicycle and in the band just above the wheel line,
-  // so neck strokes and leg strokes cannot read as bars.
-  const barItems = wheels ? stroked.filter((item) => barZone(item) && item.bounds.minX > wheels[0].cx + wheelbase * 0.5 && item.bounds.minY > wheels[0].cy - wheelbase * 0.55) : [];
+  // the front half of the bicycle and in the band just above the wheel line —
+  // no higher than about half a wheelbase above the axles, as the prompt
+  // states — and warm geometry is never a bar, so beaks, neck strokes and leg
+  // strokes cannot read as handlebars.
+  const barItems = wheels ? stroked.filter((item) => !warm(item.element.paint.fill) && barZone(item) && item.bounds.minX > wheels[0].cx + wheelbase * 0.5 && item.bounds.minY > wheels[0].cy - wheelbase * 0.55) : [];
   const barStyle = barItems.some((item) => item.element.curved && span(item.bounds).h > span(item.bounds).w)
     ? "drop handlebars"
     : barItems.some((item) => item.element.curved && span(item.bounds).w > width * 0.07)
@@ -412,7 +447,16 @@ function sceneChecks(scene: Scene) {
     "knobby tires": knobby,
     "smooth tires": Boolean(wheels) && !knobby,
     "fat tires": Boolean(wheels && (fatTires(wheels![0]) || fatTires(wheels![1]))),
-    "second saddle": Boolean(wheels && rounds.filter((round) => round.rx > width * 0.012 && round.rx < width * 0.05 && round.ry < round.rx * 0.6 && round.cx > wheels![0].cx && round.cx < wheels![1].cx && round.cy > wheels![0].cy - height * 0.3 && round.cy < wheels![0].cy - height * 0.12).length >= 2),
+    // A saddle is any small flat seat shape between the wheels in the saddle
+    // band — an ellipse or a flat rect both read as a seat. Two of them mean
+    // a second rider position, as the prompt states for a tandem.
+    "second saddle": Boolean(wheels && geometry.filter((item) => {
+      const { w, h } = span(item.bounds);
+      if (item.element.name !== "circle" && item.element.name !== "ellipse" && item.element.name !== "rect") return false;
+      if (w <= width * 0.02 || w >= wheels![0].rx || h > w * 0.55) return false;
+      const cx = (item.bounds.minX + item.bounds.maxX) / 2, cy = (item.bounds.minY + item.bounds.maxY) / 2;
+      return cx > wheels![0].cx && cx < wheels![1].cx && cy > wheels![0].cy - height * 0.3 && cy < wheels![0].cy - height * 0.12;
+    }).length >= 2),
     "cargo box": Boolean(wheels && geometry.some((item) => (item.element.name === "rect" || item.element.name === "polygon") && item.element.paint.fill !== "none" && span(item.bounds).w > width * 0.08 && span(item.bounds).h > height * 0.1 && item.bounds.minY < wheels![0].cy - height * 0.05 && item.bounds.minY > wheels![0].cy - height * 0.55 && overlap(item.bounds, { minX: wheels![0].cx - width * 0.08, minY: extent.minY, maxX: wheels![1].cx + width * 0.12, maxY: extent.maxY }))),
     "rear rack": Boolean(wheels && geometry.some((item) => item.element.name === "rect" && span(item.bounds).w > width * 0.07 && span(item.bounds).h < height * 0.06 && item.bounds.maxX < wheels![0].cx + wheels![0].rx + width * 0.06 && item.bounds.minY > wheels![0].bounds.minY - height * 0.12 && item.bounds.maxY < wheels![0].cy)),
     "battery pack": Boolean(wheels && geometry.some((item) => item.element.name === "rect" && item.element.paint.fill !== "none" && span(item.bounds).w >= wheels![0].rx * 0.9 && span(item.bounds).h > height * 0.03 && item.bounds.minX > wheels![0].cx && item.bounds.maxX < wheels![1].cx && item.bounds.maxY < wheels![0].cy && item.bounds.minY > extent.minY + height * 0.25)),

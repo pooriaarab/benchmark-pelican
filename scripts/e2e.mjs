@@ -70,13 +70,23 @@ const referenceScores = await Promise.all(tasks.map((task) => benchmark.score(ta
 assert.ok(referenceScores.every(({ score }) => score === 1), "every generated reference must score exactly 1");
 // Incidental decoration cannot move a score: the extent covers only the
 // connected bird-plus-vehicle figure, so a ground line, a background
-// rectangle, or a detached sun can come and go without changing any check.
+// rectangle, a detached sun, or a cloud can come and go without changing any
+// check. The probes place warm suns and pale clouds at several distances —
+// in the far corner, beside a wheel, above the bird, and at the (600,40)
+// spot a past review used to stretch the extent through the padding.
 const decorationVariants = [
   ["no-ground", (svg) => svg.replace(/<path d="M0 368H640"[^>]*\/>/, "")],
   ["second-ground", (svg) => svg.replace("</svg>", `<path d="M0 388H640" fill="none" stroke="#8a8" stroke-width="6"/></svg>`)],
   ["no-background", (svg) => svg.replace(/<rect width="640" height="420"[^>]*\/>/, "")],
   ["extra-background", (svg) => svg.replace("</svg>", `<rect width="640" height="420" fill="#dfe8ee"/></svg>`)],
-  ["sun", (svg) => svg.replace("</svg>", `<circle cx="52" cy="48" r="30" fill="#f8ecc9"/></svg>`)],
+  ["thick-ground", (svg) => svg.replace("</svg>", `<rect x="0" y="390" width="640" height="30" fill="#c9d6c9"/></svg>`)],
+  ["sun-far-left", (svg) => svg.replace("</svg>", `<circle cx="52" cy="48" r="30" fill="#f8ecc9"/></svg>`)],
+  ["sun-near-bird", (svg) => svg.replace("</svg>", `<circle cx="600" cy="40" r="25" fill="#f8d77e"/></svg>`)],
+  ["sun-beside-wheel", (svg) => svg.replace("</svg>", `<circle cx="600" cy="300" r="28" fill="#f8d77e"/></svg>`)],
+  ["sun-above-bird", (svg) => svg.replace("</svg>", `<circle cx="320" cy="24" r="20" fill="#fde68a"/></svg>`)],
+  ["cloud-left", (svg) => svg.replace("</svg>", `<path d="M20 80q20 -25 45 -8q25 -12 38 8q-20 15 -50 10q-35 5 -33 -10Z" fill="#ffffff"/></svg>`)],
+  ["cloud-right", (svg) => svg.replace("</svg>", `<path d="M560 120q18 -22 40 -7q22 -10 34 7q-18 14 -44 9q-32 5 -30 -9Z" fill="#eef4f6"/></svg>`)],
+  ["cloud-high", (svg) => svg.replace("</svg>", `<path d="M250 30q18 -20 38 -6q20 -9 30 6q-16 12 -40 8q-28 4 -28 -8Z" fill="#ffffff"/></svg>`)],
 ];
 for (const [name, apply] of decorationVariants) {
   const scored = await Promise.all(tasks.map((task) => benchmark.score(task, { answer: apply(String(task.expected)) })));
@@ -92,8 +102,10 @@ for (const [s, dx, dy] of [[0.6, 0, 0], [0.85, 0, 0], [1.08, 0, 0], [1.3, 0, 0],
 const referenceMean = referenceScores.reduce((a, { score }) => a + score, 0) / referenceScores.length;
 for (const strategy of weakAnswers) assert.ok(adversarialScores[strategy.name] < referenceMean - 0.5, `${strategy.name} must be well below the reference policy`);
 
-// A model sees only the prompt text, so a policy that draws literally what the
-// prompt states must nearly ace the suite on any canvas size.
+// A model sees only the prompt text, so a deliberately naive policy that draws
+// literally what the prompt states — its own layout, no generator code — must
+// ace the suite on any canvas size. Measured: every task at 0.8 or above on
+// the public split and on two hidden seeds.
 const promptOnlyCanvases = [[1000, 600], [640, 480], [800, 500]];
 const promptOnly = [];
 for (const [index, task] of tasks.entries()) {
@@ -101,7 +113,7 @@ for (const [index, task] of tasks.entries()) {
   const { score } = await benchmark.score(task, { answer: promptOnlySvg(String(task.prompt), w, h) });
   promptOnly.push(score);
 }
-assert.ok(promptOnly.filter((score) => score >= 0.8).length >= 25, `prompt-only policy must score >=0.8 on at least 25 of 30 public tasks, got ${promptOnly.filter((score) => score >= 0.8).length}`);
+assert.ok(promptOnly.every((score) => score >= 0.8), `prompt-only policy must score >=0.8 on every public task, worst was ${Math.min(...promptOnly)}`);
 
 // The real memorised-reference attack: replay every task's own reference drawing
 // against every other task. One memorised SVG must not separate from a wrong
@@ -215,12 +227,17 @@ for (const [s, dx, dy] of [[0.8, 0, 0], [1.25, 0, 0], [1, 30, -15]]) {
   const moved = await Promise.all(hiddenTasks.map((task) => hiddenBenchmark.score(task, { answer: transformSvg(String(task.expected), s, dx, dy) })));
   assert.ok(moved.every(({ score }) => score === 1), `hidden references stay at 1 under scale ${s} shift ${dx},${dy}`);
 }
+// Decoration invariance must hold on the hidden split too.
+for (const [name, apply] of decorationVariants.slice(4)) {
+  const scored = await Promise.all(hiddenTasks.map((task) => hiddenBenchmark.score(task, { answer: apply(String(task.expected)) })));
+  assert.ok(scored.every((row, index) => row.score === hiddenReferenceScores[index].score), `decoration "${name}" must leave every hidden reference score unchanged`);
+}
 const hiddenPromptOnly = [];
 for (const [index, task] of hiddenTasks.entries()) {
   const [w, h] = promptOnlyCanvases[index % promptOnlyCanvases.length];
   hiddenPromptOnly.push((await hiddenBenchmark.score(task, { answer: promptOnlySvg(String(task.prompt), w, h) })).score);
 }
-assert.ok(hiddenPromptOnly.filter((score) => score >= 0.8).length >= 25, "prompt-only policy must solve at least 25 of 30 hidden tasks");
+assert.ok(hiddenPromptOnly.every((score) => score >= 0.8), `prompt-only policy must score >=0.8 on every hidden task, worst was ${Math.min(...hiddenPromptOnly)}`);
 // A second hidden seed proves the prompt-only result is not seed luck.
 await execFile(process.execPath, ["scripts/gen-tasks.mjs", "--split", "hidden", "--seed", "7", "--output", "artifacts/tasks.hidden-7.jsonl"]);
 const hidden7Benchmark = createBenchmark("artifacts/tasks.hidden-7.jsonl");
@@ -230,7 +247,7 @@ for (const [index, task] of hidden7Tasks.entries()) {
   const [w, h] = promptOnlyCanvases[index % promptOnlyCanvases.length];
   hidden7PromptOnly.push((await hidden7Benchmark.score(task, { answer: promptOnlySvg(String(task.prompt), w, h) })).score);
 }
-assert.ok(hidden7PromptOnly.filter((score) => score >= 0.8).length >= 25, "prompt-only policy must solve at least 25 of 30 hidden-seed-7 tasks");
+assert.ok(hidden7PromptOnly.every((score) => score >= 0.8), `prompt-only policy must score >=0.8 on every hidden-seed-7 task, worst was ${Math.min(...hidden7PromptOnly)}`);
 const hiddenMemorisedReference = await memorisedReferenceProbe(hiddenTasks, hiddenBenchmark);
 for (const task of hiddenTasks) {
   const lower = String(task.prompt).toLowerCase();

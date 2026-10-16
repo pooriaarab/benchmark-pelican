@@ -52,7 +52,7 @@ seeded tasks -> model SVG -> safety scan -> geometry checks -> scored report
 
 The scanner rejects malformed, active, external, or oversized SVG. The score multiplies a shared-structure gate by a task-specific fit: each task names its required parts in the prompt, and a missed or unrequested part scales the score down. A drawing of the wrong bird cannot ride the shared checks to a high score.
 
-Every prompt states each checked part in plain terms, with the real numbers where a check needs one. An independent literal-number policy that draws only the numbers each prompt states — a tail fan just over 0.4 wheel radii tall, pedals on the axle line, tire strokes just over their stated minimums — earns a measured mean of 1.000 with all 30 tasks at 0.8 or above on every split exercised: the public split and held-out test seeds 7, 99 and 4242. Tail fans 0.42R to 0.7R tall all score exactly 1.0 on every tail task, so the stated 0.4R is the real threshold.
+Every prompt states each checked part in plain terms, with the real numbers where a check needs one. An independent reviewer's literal-number policy — reads only the prompt, legs ending 0.2 wheel radii above to 0.3 below the axle line, jittered body and handlebar proportions, tail fans 0.42-0.6 wheel radii tall, 30 runs per split at 1000x600 and 640x480 — measured a mean of 0.992 with runs 0.980-1.000 and 29-30 of 30 tasks at 0.8 or above on the public split; 0.999 (0.980-1.000) and 29-30 on held-out seed 7; 0.998 (0.973-1.000) and 29-30 on seed 99; 0.983 (0.960-1.000) and 28-30 on seed 4242. The builder's own literal-number policy (`scripts/literal-policy.mjs` — the builder's smoke policy; not independent evidence) scores a mean of 1.000 on the same splits. Tail fans 0.42R to 0.7R tall all score exactly 1.0 on every tail task, so the stated 0.4R is the real threshold.
 
 ## Why it exists
 
@@ -151,6 +151,8 @@ Keep hidden tasks outside the repository and package. Review public data yearly;
 The grader checks structure, not visual truth. It verifies that the parts each prompt names are present and shaped plausibly; it cannot prove species, posture, occlusion, or artistic quality. The "does it look like a pelican" question belongs to the optional vision judge, which stays off by default and unscored. Carefully chosen abstract geometry can pass.
 
 Complex transforms, CSS, nested viewports, and unusual path commands can lose credit. Public prompts may enter training data. Remote providers can retain prompts and report cost under their own terms.
+
+A beak must be a filled shape; a stroke-only orange curve is not read as a beak. Several prompt numbers are looser than the grader's real thresholds — a large beak 0.34 head-widths deep fails (the grader needs 0.35), a hooked beak over 0.85 head-widths long reads as thin curved, a tall beak 0.52 deep fails (the grader needs 0.55), and a body taller than 0.9 of its width reads as upright — so draw with a margin. Beak depth is unstated: a pointed beak 0.2 head-widths deep reads as flat, and a deep long or thin beak reads as large. A yellow body on a short-neck task, or any warm shape touching the head, can join the beak and lower the score — 201 of 213 measured yellow-body drawings scored 0.16.
 
 The optional vision judge is not implemented. No public leaderboard exists yet because this release did not run paid models.
 

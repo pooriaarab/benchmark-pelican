@@ -365,15 +365,10 @@ function sceneChecks(scene: Scene) {
   // second hop is a pouch: warm geometry that hangs clearly below an attached
   // beak AND below the head's centre line, so a warm dot inside the beak's own
   // bounding box cannot turn the beak into a pouch.
-  // A beak is warm-coloured geometry: a filled shape, or a stroked curve with
-  // a stroke at least 0.06 wheel radii wide (a hairline orange outline is too
-  // thin to read as a beak). Both forms must still overlap the head they hang
-  // from, or hang below an attached beak as a pouch.
-  const warmPainted = (item: { element: Element }) => {
-    if (warm(item.element.paint.fill)) return true;
-    return warm(item.element.paint.stroke) && (number(item.element.paint["stroke-width"]) ?? 1) >= R * 0.06;
-  };
-  const warms = scene.geometry.filter((item) => warmPainted(item) && item.bounds.minY < axleY - R * 0.3 && span(item.bounds).w > R * 0.1);
+  // A beak must be a filled warm shape. A stroke-only orange curve is not
+  // read as a beak. The shape must still overlap the head it hangs from, or
+  // hang below an attached beak as a pouch.
+  const warms = scene.geometry.filter((item) => warm(item.element.paint.fill) && item.bounds.minY < axleY - R * 0.3 && span(item.bounds).w > R * 0.1);
   const headPad = head ? { minX: head.bounds.minX - head.rx * 0.2, minY: head.bounds.minY - head.rx * 0.2, maxX: head.bounds.maxX + head.rx * 0.2, maxY: head.bounds.maxY + head.rx * 0.2 } : undefined;
   const attached = head && headPad ? warms.filter((item) => overlap(item.bounds, headPad)) : [];
   // A pouch is a second warm shape that hangs clearly below the head's centre
@@ -419,9 +414,9 @@ function sceneChecks(scene: Scene) {
   // then a plain bar. Only one bar check can pass per drawing. The zone sits
   // over the front wheel in the band just above the axle line — no higher
   // than about half a wheelbase above the axles, as the prompt states — and
-  // warm geometry is never a bar, so beaks, neck strokes and warm leg strokes
+  // warm geometry is never a bar, so beaks, neck strokes and leg strokes
   // cannot read as handlebars.
-  const barItems = wheels ? stroked.filter((item) => !warm(item.element.paint.fill) && !warm(item.element.paint.stroke) && item.bounds.minX > rearCx + WB * 0.45 && item.bounds.maxX > frontCx - WB * 0.45 && item.bounds.minY < axleY - R * 0.4 && item.bounds.maxY < axleY + R * 0.4 && item.bounds.minY > axleY - WB * 0.6 && span(item.bounds).w > R * 0.15) : [];
+  const barItems = wheels ? stroked.filter((item) => !warm(item.element.paint.fill) && item.bounds.minX > rearCx + WB * 0.45 && item.bounds.maxX > frontCx - WB * 0.45 && item.bounds.minY < axleY - R * 0.4 && item.bounds.maxY < axleY + R * 0.4 && item.bounds.minY > axleY - WB * 0.6 && span(item.bounds).w > R * 0.15) : [];
   const barStyle = barItems.some((item) => item.element.curved && span(item.bounds).h > span(item.bounds).w)
     ? "drop handlebars"
     : barItems.some((item) => item.element.curved && span(item.bounds).w > R * 0.5)
@@ -517,7 +512,7 @@ function sceneChecks(scene: Scene) {
     "smooth tires": Boolean(wheels) && !knobby,
     "fat tires": Boolean(wheels && (fatTires(wheels![0]) || fatTires(wheels![1]))),
     "second saddle": Boolean(wheels && geometry.filter(saddleLike).length >= 2),
-    "cargo box": Boolean(wheels && geometry.some((item) => (item.element.name === "rect" || item.element.name === "polygon") && item.element.paint.fill !== "none" && span(item.bounds).w > R * 0.8 && span(item.bounds).h > R * 0.5 && item.bounds.minX < frontCx + R && item.bounds.maxX > frontCx - R && item.bounds.minY < axleY - R && item.bounds.maxY < axleY - R * 0.3)),
+    "cargo box": Boolean(wheels && geometry.some((item) => (item.element.name === "rect" || item.element.name === "polygon") && item.element.paint.fill !== "none" && !warm(item.element.paint.fill) && span(item.bounds).w > R * 0.8 && span(item.bounds).h > R * 0.5 && item.bounds.minX < frontCx + R && item.bounds.maxX > frontCx - R && item.bounds.minY < axleY - R && item.bounds.minY > axleY - R * 2.5 && item.bounds.maxY < axleY - R * 0.3)),
     // A rack is a wide thin shelf right over the rear wheel, at least as wide
     // as a wheel: a smaller flat shape in the same spot reads as a saddle.
     "rear rack": Boolean(wheels && geometry.some((item) => item.element.name === "rect" && item.element.paint.fill !== "none" && span(item.bounds).w >= R && span(item.bounds).h <= R * 0.4 && span(item.bounds).w > span(item.bounds).h * 3 && Math.abs((item.bounds.minX + item.bounds.maxX) / 2 - rearCx) <= WB * 0.35 && item.bounds.minY > axleY - R * 2.5 && item.bounds.minY < wheels![0].bounds.minY - R * 0.05 && item.bounds.maxY < axleY - R * 0.3)),

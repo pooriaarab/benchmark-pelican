@@ -106,7 +106,7 @@ The local gate checks every package surface. It does not make paid provider call
 import { benchmark, run, score } from "benchmark-pelican";
 ```
 
-`run(adapter, options)` returns a benchmark-core report extended with `checkSummary` (pass rate per check) and per-row `details`. Pass `tasksPath` in options or call `createBenchmark(path)` to run a generated split file. `score(taskId, submission)` grades one SVG trace.
+`run(adapter, options)` returns a benchmark-core report extended with `checkSummary` (pass rate per check) and per-row `details`. Pass `tasksPath` in options or call `createBenchmark(path)` to run a generated split file. `score(taskId, submission, options)` grades one SVG trace and accepts the same `tasksPath` override.
 
 ## CLI
 

@@ -1,5 +1,6 @@
 node_modules/
 dist/
 artifacts/
+hidden/
 data/*.hidden.jsonl
 *.tgz

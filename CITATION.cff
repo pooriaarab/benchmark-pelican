@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this work, please cite it using the metadata below."
+title: "benchmark-pelican"
+type: software
+authors:
+  - family-names: Arab
+    given-names: Pooria
+version: "0.2.0"
+date-released: 2026-10-16
+license: MIT
+repository-code: https://github.com/pooriaarab/benchmark-pelican
+url: "https://aibenchmarkindex.com/benchmarks/benchmark-pelican"
+abstract: "Deterministic AI benchmark for SVG spatial reasoning: can a model draw a pelican riding a bicycle?"
+keywords:
+  - ai-benchmark
+  - llm-evaluation
+  - agent-evaluation
+  - deterministic-grader

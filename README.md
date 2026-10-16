@@ -52,6 +52,8 @@ seeded tasks -> model SVG -> safety scan -> geometry checks -> scored report
 
 The scanner rejects malformed, active, external, or oversized SVG. The score multiplies a shared-structure gate by a task-specific fit: each task names its required parts in the prompt, and a missed or unrequested part scales the score down. A drawing of the wrong bird cannot ride the shared checks to a high score.
 
+Every prompt states each checked part in plain terms, with the real numbers where a check needs one. A deliberately naive policy that draws only what the prompt says — measured in the E2E — earns at least 0.8 on all 30 tasks.
+
 ## Why it exists
 
 Simon Willison [popularised the pelican-on-a-bicycle prompt](https://simonwillison.net/2024/Oct/25/pelicans-on-a-bicycle/) as a quick visual model comparison. This package turns that delightful test into a repeatable public benchmark.

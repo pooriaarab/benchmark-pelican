@@ -64,17 +64,17 @@ const ANIMALS = {
 const VEHICLES = {
   public: {
     "bicycle": { bars: "handlebars", tires: "smooth tires", extras: [], wheelbase: 340, wheelR: 66, tire: 12 },
-    "tandem bicycle": { bars: "handlebars", tires: "smooth tires", extras: ["second saddle"], wheelbase: 430, wheelR: 60, tire: 10 },
+    "tandem bicycle": { bars: "handlebars", tires: "smooth tires", extras: ["second saddle"], wheelbase: 430, wheelR: 64, tire: 10 },
     "cargo bicycle": { bars: "handlebars", tires: "smooth tires", extras: ["cargo box"], wheelbase: 350, wheelR: 62, tire: 12 },
     "mountain bike": { bars: "handlebars", tires: "knobby tires", extras: [], wheelbase: 340, wheelR: 70, tire: 15 },
     "road bicycle": { bars: "drop handlebars", tires: "smooth tires", extras: [], wheelbase: 345, wheelR: 68, tire: 8 },
     "touring bicycle": { bars: "handlebars", tires: "smooth tires", extras: ["rear rack"], wheelbase: 350, wheelR: 66, tire: 10 },
     "cruiser bicycle": { bars: "swept handlebars", tires: "smooth tires", extras: [], wheelbase: 330, wheelR: 68, tire: 13 },
-    "folding bicycle": { bars: "handlebars", tires: "smooth tires", extras: [], wheelbase: 290, wheelR: 44, tire: 10 },
+    "folding bicycle": { bars: "handlebars", tires: "smooth tires", extras: [], wheelbase: 290, wheelR: 36, tire: 8 },
   },
   hidden: {
     "electric bicycle": { bars: "handlebars", tires: "smooth tires", extras: ["battery pack"], wheelbase: 345, wheelR: 66, tire: 11 },
-    "BMX bike": { bars: "handlebars", tires: "smooth tires", extras: [], wheelbase: 285, wheelR: 42, tire: 10 },
+    "BMX bike": { bars: "handlebars", tires: "smooth tires", extras: [], wheelbase: 285, wheelR: 36, tire: 8 },
     "gravel bike": { bars: "drop handlebars", tires: "knobby tires", extras: [], wheelbase: 340, wheelR: 66, tire: 12 },
     "city bike": { bars: "swept handlebars", tires: "smooth tires", extras: ["rear rack"], wheelbase: 335, wheelR: 66, tire: 11 },
     "track bicycle": { bars: "drop handlebars", tires: "smooth tires", extras: [], wheelbase: 350, wheelR: 68, tire: 7 },
@@ -91,21 +91,20 @@ const article = (word) => (/^[aeiou]/i.test(word) ? "an" : "a");
 // part is visible in the prompt.
 function partsFor(animal, aspect, vehicle, spec) {
   const wheelSize = spec.wheelR >= 52 ? "full-size wheels" : "small wheels";
-  const wheelbaseClass = spec.wheelbase > 384 ? "long wheelbase" : "standard wheelbase";
   const tires = spec.tires === "fat tires" ? ["knobby tires", "fat tires"] : [spec.tires];
   const specific = [
     aspect.beak, aspect.neck, aspect.body,
     ...(aspect.legs === "long legs" ? ["long legs"] : []),
     ...aspect.extras,
     ...(spec.bars === "handlebars" ? [] : [spec.bars]),
-    wheelSize, wheelbaseClass, ...tires, ...spec.extras,
+    wheelSize, ...tires, ...spec.extras,
   ];
   const requiredParts = [...new Set([...GATE_PARTS, ...specific])];
   const hint = (part) => (PART_HINTS[part] ? ` (${PART_HINTS[part]})` : "");
   const birdLegs = aspect.legs === "long legs" ? `long legs reaching the pedals${hint("long legs")}` : "legs reaching the pedals";
   const animalText = `${article(aspect.beak)} ${aspect.beak}${hint(aspect.beak)}, ${article(aspect.neck)} ${aspect.neck}${hint(aspect.neck)}, ${article(aspect.body)} ${aspect.body}${hint(aspect.body)}, a head, and ${birdLegs}${aspect.extras.length ? `, plus ${aspect.extras.map((extra) => `${extra} ${hint(extra)}`).join(" and ")}` : ""}`;
   const extras = spec.extras.map((extra) => `${article(extra)} ${extra}${hint(extra)}`).join(" and ");
-  const vehicleText = `two wheels, a bicycle frame, ${spec.bars}${hint(spec.bars)}, pedals, ${wheelSize}${hint(wheelSize)}, ${article(wheelbaseClass)} ${wheelbaseClass}${hint(wheelbaseClass)}, ${tires.map((tire) => `${tire}${hint(tire)}`).join(" and ")}${extras ? `, plus ${extras}` : ""}`;
+  const vehicleText = `two wheels, a bicycle frame, ${spec.bars}${hint(spec.bars)}, pedals${hint("pedals")}, ${wheelSize}${hint(wheelSize)}, ${tires.map((tire) => `${tire}${hint(tire)}`).join(" and ")}${extras ? `, plus ${extras}` : ""}`;
   const clause = ` The ${animal} has ${animalText}. The ${vehicle} has ${vehicleText}.`;
   return { requiredParts, clause };
 }
@@ -164,7 +163,7 @@ function bicycleSvg(spec, random) {
   if (spec.extras.includes("second saddle")) parts.push(`<ellipse cx="${round(rearX + wheelbase * 0.62)}" cy="${seatY - 18}" rx="19" ry="7" fill="${dark}"/><path d="M${round(rearX + wheelbase * 0.62)} ${seatY - 12}L${round(rearX + wheelbase * 0.62)} ${seatY + 4}" stroke="${dark}" stroke-width="8"/>`);
   if (spec.extras.includes("cargo box")) parts.push(`<rect x="${frontX - 40}" y="${cy - radius - 58}" width="96" height="56" rx="6" fill="#b08968" stroke="#6b4f35" stroke-width="5"/>`);
   if (spec.extras.includes("rear rack")) parts.push(`<rect x="${rearX - 48}" y="${cy - radius - 14}" width="92" height="10" rx="4" fill="${dark}"/>`);
-  if (spec.extras.includes("battery pack")) parts.push(`<rect x="${round(rearX + wheelbase * 0.28)}" y="${bbY - 66}" width="70" height="24" rx="6" fill="#495057"/>`);
+  if (spec.extras.includes("battery pack")) parts.push(`<rect x="${round(rearX + wheelbase * 0.28)}" y="${bbY - 66}" width="${round(spec.wheelR * 1.15)}" height="26" rx="6" fill="#495057"/>`);
   return { parts, wheels: { rearX, frontX, cy, radius }, bbX, bbY, seatY };
 }
 
@@ -206,13 +205,14 @@ function birdSvg(spec, wheels, random, palette) {
   parts.push(`<circle cx="${hx}" cy="${hy}" r="${hr}" fill="${palette.body}" stroke="#33343a" stroke-width="5"/>`);
   parts.push(`<circle cx="${hx + 14}" cy="${hy - 10}" r="5" fill="#22252b"/>`);
   parts.push(beakSvg(spec.beak, head, palette.beak));
-  // Long-legged birds start their legs well inside the body so the strokes are
-  // clearly longer than the gap between the body and the wheels.
-  const legY = spec.legs === "long legs" ? round(bodyCy - bodyRy * 0.25) : bodyCy + bodyRy - 6, pedalY = wheels.bbY - 2;
+  // Long-legged birds let their thin legs dangle below the wheel axles, the
+  // way a wading bird's legs hang off a bicycle; other birds reach the pedals.
+  const legY = bodyCy + bodyRy - 6;
+  const legEnd = spec.legs === "long legs" ? round(wheels.wheels.cy + wheels.wheels.radius * 0.3) : wheels.bbY - 2;
   const legStroke = spec.legs === "long legs" ? 6 : 13;
   const legSpread = upright ? 30 : 44;
-  parts.push(`<path d="M${bx - legSpread} ${legY}Q${bx - legSpread - 8} ${round((legY + pedalY) / 2)} ${bx - legSpread + 10} ${pedalY}M${bx + legSpread - 14} ${legY + 4}Q${bx + legSpread - 4} ${round((legY + pedalY) / 2)} ${bx + legSpread + 12} ${pedalY}" fill="none" stroke="${palette.legs}" stroke-width="${legStroke}" stroke-linecap="round"/>`);
-  parts.push(`<path d="M${bx - legSpread + 2} ${pedalY + 4}l24 2M${bx + legSpread + 4} ${pedalY + 2}l22 -6" stroke="#33343a" stroke-width="7" stroke-linecap="round"/>`);
+  parts.push(`<path d="M${bx - legSpread} ${legY}Q${bx - legSpread - 8} ${round((legY + legEnd) / 2)} ${bx - legSpread + 10} ${legEnd}M${bx + legSpread - 14} ${legY + 4}Q${bx + legSpread - 4} ${round((legY + legEnd) / 2)} ${bx + legSpread + 12} ${legEnd}" fill="none" stroke="${palette.legs}" stroke-width="${legStroke}" stroke-linecap="round"/>`);
+  parts.push(`<path d="M${bx - legSpread + 2} ${legEnd + 4}l24 2M${bx + legSpread + 4} ${legEnd + 2}l22 -6" stroke="#33343a" stroke-width="7" stroke-linecap="round"/>`);
   return parts;
 }
 

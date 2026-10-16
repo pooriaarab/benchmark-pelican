@@ -30,7 +30,9 @@ Fill and stroke are resolved the way a renderer would: inherited from ancestors 
 
 ## Measuring against the drawing, not the canvas
 
-Every geometric check is measured against the drawing's own extent — the bounding box of its visible shapes — or against named parts (the head width, the wheel radius, the wheelbase, the gap between body and wheel line). Nothing is measured against the `viewBox` or `width`/`height`, so scaling or translating the whole drawing leaves every check, and the score, unchanged. The E2E proves this by rescaling and shifting every reference drawing and asserting identical scores.
+Every geometric check is measured against the drawing's own extent — the bounding box of the bird-plus-vehicle figure — or against named parts (the head width, the wheel radius, the wheelbase, the band above the wheel line). Nothing is measured against the `viewBox` or `width`/`height`, so scaling or translating the whole drawing leaves every check, and the score, unchanged. The E2E proves this by rescaling and shifting every reference drawing and asserting identical scores.
+
+The extent deliberately excludes decoration: a background rectangle covering the canvas, any long thin horizontal stroke such as a ground line or horizon, and any shape that does not touch the connected bird-and-bicycle figure (a sun or cloud in a corner). Adding or removing any of those leaves every check unchanged, which the E2E verifies per reference drawing.
 
 ## Checks and scoring
 
@@ -41,9 +43,9 @@ score = sharedGate x taskFit
 taskFit = 0.4 ^ (missed required task-specific parts + unrequested task-specific parts drawn)
 ```
 
-The shared gate holds the checks every task asks for: safe well-formed markup, two wheels, a bicycle frame, handlebars, pedals, a bird body, a bird head, a beak, legs reaching the pedals, and canvas coverage. The task fit holds the parts that change per task: the named animal's beak style, neck, body posture, legs and extras, and the named vehicle's handlebar style, wheel size, wheelbase class, tire class, and extras. A memorised drawing of the wrong bird fails the specific checks instead of coasting on the shared ones, and a drawing that adds parts the task never asked for is penalised the same way.
+The shared gate holds the checks every task asks for: safe well-formed markup, two wheels, a bicycle frame, handlebars, pedals, a bird body, a bird head, a beak, legs reaching the pedals, and canvas coverage. The task fit holds the parts that change per task: the named animal's beak style, neck, body posture, legs and extras, and the named vehicle's handlebar style, wheel size, tire class, and extras. A memorised drawing of the wrong bird fails the specific checks instead of coasting on the shared ones, and a drawing that adds parts the task never asked for is penalised the same way.
 
-Each task's `metadata.requiredParts` lists the parts the prompt states; the generator asserts every checked part appears in the prompt text, and each prompt spells out what the grader measures in plain terms ("an orange or yellow beak clearly longer than the head is wide"). The E2E includes a prompt-only policy that parses the prompt text alone and draws simple literal shapes; it earns at least 0.8 on all 30 public tasks and at least 25 of 30 hidden tasks, which is what "solvable from the prompt alone" means here: a drawing that follows every stated part earns about 1.0, and each missed or improvised specific part costs a 0.4x multiplier. The E2E also replays every task's reference drawing on every other task in both splits, so the separation is measured rather than assumed.
+Each task's `metadata.requiredParts` lists the parts the prompt states; the generator asserts every checked part appears in the prompt text, and each prompt spells out what the grader measures in plain terms with the real numbers where a check needs one ("a straight orange or yellow beak at least 1.6 times as long as the head is wide"). The E2E includes a prompt-only policy that parses the prompt text alone and draws simple literal shapes on canvases of different sizes; measured today, that policy earns 1.0 on all 30 public tasks and all 30 tasks on two hidden seeds, so a drawing that follows every stated part earns a perfect score. Each missed or improvised specific part costs a 0.4x multiplier. The E2E also replays every task's reference drawing on every other task in both splits, so the separation is measured rather than assumed.
 
 ### Shared gate checks
 
@@ -54,8 +56,8 @@ Each task's `metadata.requiredParts` lists the parts the prompt states; the gene
 | coverage | 0.02 | The drawing's own extent is non-degenerate: a landscape scene, not a thin strip |
 | two wheels | 0.15 | Two separated, similarly sized circles or ellipses in the lower region |
 | bicycle frame | 0.11 | Stroked geometry spanning the gap between the wheels, above wheel centres |
-| handlebars | 0.06 | Stroked geometry in the front half of the bicycle, below the bird's head |
-| pedals | 0.05 | A small round hub between the wheels, above wheel centres |
+| handlebars | 0.06 | Stroked geometry in the front half of the bicycle, in the band just above the wheel line |
+| pedals | 0.05 | A small shape (a crank hub or pedal) between the wheels, near axle height |
 | bird body | 0.12 | The largest substantial round or elliptical body above the bicycle |
 | bird head | 0.07 | A smaller round above and ahead of the body |
 | beak | 0.10 | Warm-coloured filled geometry overlapping the head zone |
@@ -67,16 +69,15 @@ Each task requires its own subset, and a passing check the task did not request 
 
 | Check | Evidence |
 | --- | --- |
-| beak styles | Exactly one, all measured against the head width D: pouch (a second warm shape hanging below), large (longer and deeper than the head is wide), long pointed (straight, at least 1.6 D), pointed (straight, 0.75-1.6 D), flat (straight, at least 4x wider than tall, at most 1.05 D), thin curved (curved downward, at least 0.85 D), tall colourful (at least 0.55 D deep), hooked (curved, under 0.85 D), short (straight, under 0.65 D) |
+| beak styles | Exactly one, all measured against the head width D: pouch (a second warm shape hanging below), large (at least 1.2 D long and 0.35 D deep), long pointed (straight, at least 1.6 D), pointed (straight, 0.55-1.6 D), flat (straight, at least 4x wider than tall, at most 1.05 D), thin curved (curved downward, at least 0.85 D), tall colourful (at least 0.55 D deep), hooked (curved, under 0.85 D), short (straight, under 0.55 D) |
 | neck | `long neck` (a stroked bridge from body to head) or `short neck` |
 | body posture | `upright body` (at least as tall as wide) or `level body` |
-| long legs | A thin leg stroke spanning at least 1.25 times the gap between the body's underside and the wheel line |
+| long legs | A thin leg stroke leaving the body and dropping clearly below the wheel axles |
 | tail feathers | Filled geometry with real height behind the body |
 | bar styles | Exactly one of: drop handlebars, swept handlebars, or plain handlebars |
-| wheel size | `small wheels` (radius under 7.5% of the drawing's width) or `full-size wheels` |
-| wheelbase | `long wheelbase` (wheel separation over 60% of the drawing's width) or `standard wheelbase` |
+| wheel size | `small wheels` (radius under 14% of the scene's height) or `full-size wheels` |
 | tires | `knobby tires` (thick tread or concentric outer ring), `fat tires` (very thick tread), or `smooth tires` |
-| extras | `second saddle`, `cargo box`, `rear rack`, `battery pack` |
+| extras | `second saddle`, `cargo box`, `rear rack`, `battery pack` (a rect between the wheels nearly as wide as a wheel, so an ordinary rectangular saddle does not count) |
 
 Warm colours mean orange through yellow hues only; cream and near-white fills do not count. Beak checks read geometry that overlaps the head zone, so a stray warm rectangle elsewhere does not pass.
 

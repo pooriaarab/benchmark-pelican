@@ -195,7 +195,8 @@ function sceneChecks(scene: Scene) {
   const between = (item: { bounds: Bounds }) => wheels && item.bounds.minX <= wheels[1].cx && item.bounds.maxX >= wheels[0].cx;
   const upper = (item: { bounds: Bounds }) => item.bounds.minY < canvas.minY + height * 0.55;
   const bodies = rounds.filter((round) => round.cy < canvas.minY + height * 0.58 && round.rx > width * 0.05 && round.ry > height * 0.06 && (!wheels || round.cy < wheels[0].cy - height * 0.12));
-  const body = bodies[0];
+  // The body is the largest upper-region round, so a head circle cannot win.
+  const body = bodies.reduce<Round | undefined>((best, round) => !best || round.rx * round.ry > best.rx * best.ry ? round : best, undefined);
   const head = body && rounds.find((round) => round !== body && round.rx >= width * 0.015 && round.rx <= Math.max(body.rx * 0.75, width * 0.02) && round.ry <= Math.max(body.ry * 0.9, height * 0.03) && round.cy < body.cy && round.cx > body.cx - body.rx * 0.35 && round.cx < canvas.maxX);
   const warms = geometry.filter((item) => warm(item.element.attrs.fill) && upper(item) && span(item.bounds).w > width * 0.02);
   const headZone = head ? { minX: head.cx - head.rx * 0.4, minY: head.bounds.minY - head.rx, maxX: head.bounds.maxX + head.rx * 4, maxY: head.bounds.maxY + head.rx * 1.6 } : undefined;
@@ -207,63 +208,124 @@ function sceneChecks(scene: Scene) {
   const barZone = (item: { bounds: Bounds }) => Boolean(wheels && item.bounds.minY < wheels[0].cy - height * 0.15 && item.bounds.maxY < wheels[0].cy + height * 0.02 && item.bounds.maxX > wheels[1].cx - (wheels[1].cx - wheels[0].cx) * 0.45 && span(item.bounds).w > width * 0.03);
   const beakHasCurve = beaks.some((item) => item.element.curved);
   const pouch = beaks.some((item, i) => beaks.some((other, j) => i !== j && overlap(item.bounds, other.bounds, width * 0.02) && other.bounds.minY > item.bounds.minY + 4));
-  const beakSpan = (predicate: (w: number, h: number) => boolean) => beaks.some((item) => { const s = span(item.bounds); return predicate(s.w, s.h); });
-  const legStrokes = stroked.filter((item) => item.bounds.minY > canvas.minY + height * 0.35 && item.bounds.maxY > item.bounds.minY + height * 0.14 && item.bounds.minY < (body ? body.bounds.maxY + height * 0.06 : canvas.minY + height * 0.7));
+  // The union of the warm geometry near the head classifies into exactly one
+  // beak style, so a drawing can satisfy at most one beak check at a time.
+  const beakUnion = beaks.reduce<Bounds | undefined>((all, item) => all ? { minX: Math.min(all.minX, item.bounds.minX), minY: Math.min(all.minY, item.bounds.minY), maxX: Math.max(all.maxX, item.bounds.maxX), maxY: Math.max(all.maxY, item.bounds.maxY) } : item.bounds, undefined);
+  const beakDim = beakUnion ? span(beakUnion) : { w: 0, h: 0 };
+  const beakStyle = (() => {
+    if (beaks.length === 0) return undefined;
+    if (pouch) return "pouch beak";
+    const w = beakDim.w / width, h = beakDim.h / height, ratio = beakDim.w / Math.max(beakDim.h, 1);
+    if (!beakHasCurve) {
+      if (w > 0.18 && ratio >= 4) return "long pointed beak";
+      if (w > 0.16) return "large beak";
+      if (w >= 0.12 && ratio >= 3) return "pointed beak";
+      if (w >= 0.09 && ratio >= 3 && h <= 0.05) return "flat beak";
+      if (w < 0.075) return "short beak";
+      if (w < 0.14) return "orange beak";
+      return "beak";
+    }
+    if (w > 0.16) return "large beak";
+    if (w > 0.12) return "thin curved beak";
+    if (h > 0.12 && h >= w * 1.5) return "tall colourful beak";
+    if (h > 0.1) return "curved beak";
+    if (w <= 0.042) return "small hooked beak";
+    return "hooked beak";
+  })();
+  // Handlebars classify the same way: a drop curl wins, then a wide swept bar,
+  // then a plain bar. Only one bar check can pass per drawing. The zone sits in
+  // the front half of the bicycle and below the bird's head, so neck strokes and
+  // leg strokes cannot read as bars.
+  const barItems = wheels ? stroked.filter((item) => barZone(item) && item.bounds.minX > wheels[0].cx + (wheels[1].cx - wheels[0].cx) * 0.5 && item.bounds.minY > canvas.minY + height * 0.4) : [];
+  const barStyle = barItems.some((item) => item.element.curved && span(item.bounds).h > span(item.bounds).w)
+    ? "drop handlebars"
+    : barItems.some((item) => item.element.curved && span(item.bounds).w > width * 0.07)
+      ? "swept handlebars"
+      : barItems.length > 0 ? "handlebars" : undefined;
+  // Legs are drawn strokes under the body; wheels, tails, frame members and
+  // cargo boxes do not count. A tail sweeps well left of the body, the frame
+  // spans the wheels, and a box sits ahead of it.
+  const legStrokes = stroked.filter((item) => (item.element.name === "path" || item.element.name === "line" || item.element.name === "polyline") && item.bounds.minY > canvas.minY + height * 0.35 && item.bounds.maxY > item.bounds.minY + height * 0.1 && item.bounds.minY < (body ? body.bounds.maxY + height * 0.06 : canvas.minY + height * 0.7) && (!body || (item.bounds.minX > body.bounds.minX - width * 0.05 && item.bounds.maxX <= body.bounds.maxX + width * 0.1)));
 
+  const knobby = Boolean(wheels && (wheelThickness(wheels![0]) || wheelThickness(wheels![1])));
+  // A neck is a stroke bridging body to head that starts behind the head, so a
+  // pouch or beak hanging ahead of the head cannot count.
+  const neckStroke = body && head && stroked.find((item) => item.bounds !== head.bounds && item.bounds !== body.bounds && span(item.bounds).h > height * 0.1 && span(item.bounds).w < width * 0.35 && item.bounds.minX < head.cx && item.bounds.minY <= head.bounds.maxY + height * 0.05 && item.bounds.maxY >= body.bounds.minY - height * 0.05 && item.bounds.minY < body.bounds.minY);
   const checks: Record<string, boolean> = {
-    "svg root": true,
     "two wheels": Boolean(wheels),
     "bicycle frame": Boolean(wheels && stroked.some((item) => between(item) && span(item.bounds).w > (wheels![1].cx - wheels![0].cx) * 0.4 && item.bounds.minY < scene.frameTop)),
-    "handlebars": Boolean(wheels && stroked.some((item) => barZone(item) && item.bounds.minX > wheels![0].cx)),
-    "drop handlebars": Boolean(wheels && stroked.some((item) => barZone(item) && item.element.curved)),
-    "swept handlebars": Boolean(wheels && stroked.some((item) => barZone(item) && span(item.bounds).w > width * 0.07)),
+    "handlebars": barItems.length > 0,
     "pedals": Boolean(wheels && rounds.some((round) => round.rx < wheels![0].rx * 0.4 && round.rx > width * 0.008 && round.cx > wheels![0].cx && round.cx < wheels![1].cx && round.cy < wheels![0].cy && round.cy > wheels![0].cy - height * 0.25)),
-    "long wheelbase": Boolean(wheels && wheels[1].cx - wheels[0].cx > width * 0.55),
+    "bird body": Boolean(body),
+    "bird head": Boolean(head),
+    "beak": beaks.length > 0,
+    "legs reaching the pedals": legsToPedals,
+    // Task-specific bird parts: the named animal's own cues.
+    "long neck": Boolean(neckStroke),
+    "short neck": Boolean(body && head && !neckStroke && head.bounds.maxY >= body.bounds.minY - height * 0.02),
+    "upright body": Boolean(body && body.ry >= body.rx * 0.9),
+    "level body": Boolean(body && body.ry < body.rx * 0.9),
+    "long legs": legStrokes.some((item) => Number(item.element.attrs["stroke-width"] ?? 99) <= 9 && span(item.bounds).h > height * 0.12) || legStrokes.some((item) => span(item.bounds).h > height * 0.27),
+    "tail feathers": Boolean(body && geometry.some((item) => item.element.attrs.fill && item.element.attrs.fill !== "none" && item.bounds.maxX < body.bounds.minX + width * 0.06 && span(item.bounds).w > width * 0.04 && span(item.bounds).h > height * 0.05 && item.bounds.minY > body.bounds.minY && item.bounds.minY <= body.bounds.maxY)),
+    // Beak styles are exclusive: one drawing has exactly one beak shape.
+    "pouch beak": beakStyle === "pouch beak",
+    "curved beak": beakStyle === "curved beak",
+    "large beak": beakStyle === "large beak",
+    "long pointed beak": beakStyle === "long pointed beak",
+    "flat beak": beakStyle === "flat beak",
+    "orange beak": beakStyle === "orange beak",
+    "hooked beak": beakStyle === "hooked beak",
+    "short beak": beakStyle === "short beak",
+    "small hooked beak": beakStyle === "small hooked beak",
+    "thin curved beak": beakStyle === "thin curved beak",
+    "tall colourful beak": beakStyle === "tall colourful beak",
+    "pointed beak": beakStyle === "pointed beak",
+    // Task-specific bicycle parts: the named vehicle's own cues.
+    "drop handlebars": barStyle === "drop handlebars",
+    "swept handlebars": barStyle === "swept handlebars",
+    "small wheels": Boolean(wheels && wheels[0].rx < width * 0.08 && wheels[1].rx < width * 0.08),
+    "full-size wheels": Boolean(wheels && wheels[0].rx >= width * 0.08 && wheels[1].rx >= width * 0.08),
+    "long wheelbase": Boolean(wheels && wheels[1].cx - wheels[0].cx > width * 0.6),
+    "standard wheelbase": Boolean(wheels && wheels[1].cx - wheels[0].cx <= width * 0.6),
+    "knobby tires": knobby,
+    "smooth tires": Boolean(wheels) && !knobby,
+    "fat tires": Boolean(wheels && (fatTires(wheels![0]) || fatTires(wheels![1]))),
     "second saddle": Boolean(wheels && rounds.filter((round) => round.rx > width * 0.012 && round.rx < width * 0.05 && round.ry < round.rx * 0.6 && round.cx > wheels![0].cx && round.cx < wheels![1].cx && round.cy > wheels![0].cy - height * 0.3 && round.cy < wheels![0].cy - height * 0.12).length >= 2),
     "cargo box": Boolean(wheels && geometry.some((item) => (item.element.name === "rect" || item.element.name === "polygon") && item.element.attrs.fill && item.element.attrs.fill !== "none" && span(item.bounds).w > width * 0.08 && span(item.bounds).h > height * 0.08 && item.bounds.minY < wheels![0].cy - height * 0.05 && item.bounds.minY > wheels![0].cy - height * 0.55 && overlap(item.bounds, { minX: wheels![0].cx - width * 0.08, minY: canvas.minY, maxX: wheels![1].cx + width * 0.12, maxY: canvas.maxY }))),
     "rear rack": Boolean(wheels && geometry.some((item) => item.element.name === "rect" && span(item.bounds).w > width * 0.07 && span(item.bounds).h < height * 0.06 && item.bounds.maxX < wheels![0].cx + wheels![0].rx + width * 0.06 && item.bounds.minY > wheels![0].bounds.minY - height * 0.12 && item.bounds.maxY < wheels![0].cy)),
-    "battery pack": Boolean(wheels && geometry.some((item) => item.element.name === "rect" && item.element.attrs.fill !== "none" && item.element.attrs.fill !== undefined && span(item.bounds).w > width * 0.06 && span(item.bounds).h > height * 0.03 && item.bounds.minX > wheels![0].cx && item.bounds.maxX < wheels![1].cx && item.bounds.maxY < wheels![0].cy && item.bounds.minY > scene.frameTop - height * 0.1)),
-    "knobby tires": Boolean(wheels && (wheelThickness(wheels![0]) || wheelThickness(wheels![1]))),
-    "small wheels": Boolean(wheels && wheels[0].rx < width * 0.09 && wheels[1].rx < width * 0.09),
-    "bird body": bodies.length > 0,
-    "upright body": bodies.some((round) => round.ry >= round.rx * 0.9),
-    "bird head": Boolean(head),
-    "long neck": Boolean(body && head && stroked.some((item) => span(item.bounds).h > height * 0.1 && span(item.bounds).w < width * 0.35 && item.bounds.minY <= head.bounds.maxY + height * 0.05 && item.bounds.maxY >= body.bounds.minY - height * 0.05 && item.bounds.minY < body.bounds.minY)),
-    "legs reaching the pedals": legsToPedals,
-    "long legs": legStrokes.some((item) => Number(item.element.attrs["stroke-width"] ?? 99) <= 9 && span(item.bounds).h > height * 0.16) || legStrokes.some((item) => span(item.bounds).h > height * 0.24),
-    "tail feathers": Boolean(body && geometry.some((item) => item.element.attrs.fill && item.element.attrs.fill !== "none" && item.bounds.maxX < body.bounds.minX + width * 0.06 && span(item.bounds).w > width * 0.04 && item.bounds.minY > body.bounds.minY)),
-    // Beak styles. Each predicate reads bounds of warm filled geometry near the head.
-    "pouch beak": pouch && beakSpan((w) => w > width * 0.1),
-    "curved beak": beakHasCurve && beakSpan((w, h) => w < width * 0.1 && h > w * 0.5),
-    "large beak": !pouch && beakSpan((w) => w > width * 0.16),
-    "long pointed beak": beakSpan((w, h) => w > width * 0.14 && w / Math.max(h, 1) >= 3),
-    "flat beak": beakSpan((w, h) => w > width * 0.05 && w < width * 0.13 && w / Math.max(h, 1) >= 2.5),
-    "orange beak": beakSpan((w) => w > width * 0.04 && w < width * 0.12),
-    "hooked beak": beakHasCurve && beakSpan((w) => w < width * 0.1),
-    "short beak": beakSpan((w, h) => w < width * 0.08 && w / Math.max(h, 1) >= 1.4),
-    "small hooked beak": beakHasCurve && beakSpan((w) => w < width * 0.08),
-    "thin curved beak": beakHasCurve && beakSpan((w, h) => w > width * 0.1 && h > height * 0.07),
-    "tall colourful beak": beakSpan((w, h) => h > w && h > height * 0.06),
-    "pointed beak": beakSpan((w, h) => w > width * 0.08 && w < width * 0.16 && w / Math.max(h, 1) >= 3),
-    "beak": beaks.length > 0,
+    "battery pack": Boolean(wheels && geometry.some((item) => item.element.name === "rect" && item.element.attrs.fill !== "none" && item.element.attrs.fill !== undefined && span(item.bounds).w > width * 0.06 && span(item.bounds).h > height * 0.03 && item.bounds.minX > wheels![0].cx && item.bounds.maxX < wheels![1].cx && item.bounds.maxY < wheels![0].cy && item.bounds.minY > canvas.minY + height * 0.25)),
   };
   function wheelThickness(wheel: Round) {
     const strokeWidth = Number(wheel.element.attrs["stroke-width"] ?? 0);
-    return strokeWidth >= wheel.rx * 0.14 || rounds.some((round) => Math.abs(round.cx - wheel.cx) < wheel.rx * 0.15 && Math.abs(round.cy - wheel.cy) < wheel.rx * 0.15 && round.rx > wheel.rx && round.rx < wheel.rx * 1.3);
+    // The absolute floor keeps a normal tire on a small wheel from reading as
+    // knobby: 10 px of tread on a 44 px wheel is not a mountain-bike tire.
+    return (strokeWidth >= wheel.rx * 0.22 && strokeWidth >= 12) || rounds.some((round) => round !== wheel && Math.abs(round.cx - wheel.cx) < wheel.rx * 0.15 && Math.abs(round.cy - wheel.cy) < wheel.rx * 0.15 && round.rx > wheel.rx && round.rx < wheel.rx * 1.3);
+  }
+  function fatTires(wheel: Round) {
+    const strokeWidth = Number(wheel.element.attrs["stroke-width"] ?? 0);
+    return strokeWidth >= wheel.rx * 0.26 && strokeWidth >= 18;
   }
   return { checks, bodies, head, beaks };
 }
 
-const WEIGHTS: Record<string, number> = {
-  "svg root": 0.04, "two wheels": 0.15, "bicycle frame": 0.11, "handlebars": 0.06, "drop handlebars": 0.06, "swept handlebars": 0.06,
-  "pedals": 0.05, "long wheelbase": 0.04, "second saddle": 0.04, "cargo box": 0.05, "rear rack": 0.04, "battery pack": 0.04,
-  "knobby tires": 0.05, "small wheels": 0.05, "bird body": 0.12, "upright body": 0.12, "bird head": 0.07, "long neck": 0.05,
-  "legs reaching the pedals": 0.05, "long legs": 0.04, "tail feathers": 0.04,
-  "pouch beak": 0.1, "curved beak": 0.1, "large beak": 0.1, "long pointed beak": 0.1, "flat beak": 0.1, "orange beak": 0.1,
-  "hooked beak": 0.1, "short beak": 0.1, "small hooked beak": 0.1, "thin curved beak": 0.1, "tall colourful beak": 0.1, "pointed beak": 0.1, "beak": 0.1,
+// Shared checks form the structural gate; every task asks for all of them.
+const SHARED_WEIGHTS: Record<string, number> = {
+  "two wheels": 0.15, "bicycle frame": 0.11, "handlebars": 0.06, "pedals": 0.05,
+  "bird body": 0.12, "bird head": 0.07, "beak": 0.1, "legs reaching the pedals": 0.05,
 };
 const BASE_CHECKS: Array<[string, number]> = [["svg canvas", 0.05], ["complexity", 0.08], ["coverage", 0.02]];
-const DEFAULT_PARTS = ["svg root", "two wheels", "bicycle frame", "handlebars", "pedals", "bird body", "bird head", "beak", "legs reaching the pedals"];
+// Every other check is task-specific: it separates one named animal or vehicle
+// from another. Missing a required part, or drawing an unrequested one, scales
+// the task fit by MISS_FACTOR each.
+const MISS_FACTOR = 0.4;
+const SPECIFIC_CHECKS = new Set([
+  "long neck", "short neck", "upright body", "level body", "long legs", "tail feathers",
+  "pouch beak", "curved beak", "large beak", "long pointed beak", "flat beak", "orange beak",
+  "hooked beak", "short beak", "small hooked beak", "thin curved beak", "tall colourful beak", "pointed beak",
+  "drop handlebars", "swept handlebars", "small wheels", "full-size wheels", "long wheelbase", "standard wheelbase",
+  "knobby tires", "smooth tires", "fat tires", "second saddle", "cargo box", "rear rack", "battery pack",
+]);
+const DEFAULT_PARTS = Object.keys(SHARED_WEIGHTS);
 
 export function safeSvg(answer: string): string | undefined {
   return typeof scan(answer) === "string" ? undefined : extract(answer);
@@ -276,17 +338,29 @@ export function gradeSvg(answer: unknown, task?: Task): TaskScore {
   const { scene } = scanned;
   const { width, height, geometry } = scene;
   const { checks, head, beaks } = sceneChecks(scene);
-  const parts = (task?.metadata?.requiredParts as string[] | undefined)?.filter((part) => WEIGHTS[part] !== undefined) ?? DEFAULT_PARTS;
-  const rows: Array<{ name: string; weight: number; passed: boolean }> = [];
-  for (const part of parts) rows.push({ name: part, weight: WEIGHTS[part]!, passed: checks[part] === true });
+  const requested = (task?.metadata?.requiredParts as string[] | undefined) ?? DEFAULT_PARTS;
+  const parts = requested.filter((part) => checks[part] !== undefined);
+  const rows: Array<{ name: string; weight: number; passed: boolean; kind: "gate" | "task" }> = [];
+  const missed: string[] = [];
+  for (const part of parts) {
+    const kind = SHARED_WEIGHTS[part] === undefined ? "task" : "gate";
+    const passed = checks[part] === true;
+    if (!passed && kind === "task") missed.push(part);
+    rows.push({ name: part, weight: kind === "gate" ? SHARED_WEIGHTS[part]! : 1, passed, kind });
+  }
+  // Shared base rows ride along in the gate as well.
   const useful = geometry.filter((item) => !(item.element.name === "rect" && span(item.bounds).w > width * 0.9 && span(item.bounds).h > height * 0.9));
   const extent = useful.length ? useful.reduce((all, item) => ({ minX: Math.min(all.minX, item.bounds.minX), minY: Math.min(all.minY, item.bounds.minY), maxX: Math.max(all.maxX, item.bounds.maxX), maxY: Math.max(all.maxY, item.bounds.maxY) }), useful[0]!.bounds) : undefined;
   for (const [name, weight] of BASE_CHECKS) {
     const passed = name === "svg canvas" ? true : name === "complexity" ? geometry.length >= 12 && geometry.length <= 200 : Boolean(extent && extent.maxX - extent.minX > width * 0.5 && extent.maxY - extent.minY > height * 0.5);
-    rows.push({ name, weight, passed });
+    rows.push({ name, weight, passed, kind: "gate" });
   }
-  const total = rows.reduce((sum, row) => sum + row.weight, 0);
-  let score = rows.reduce((sum, row) => sum + (row.passed ? row.weight : 0), 0) / total;
+  // Unrequested task-specific parts that were drawn anyway count against fit.
+  const unexpected = [...SPECIFIC_CHECKS].filter((name) => !parts.includes(name) && checks[name] === true);
+  const gateTotal = rows.filter((row) => row.kind === "gate").reduce((sum, row) => sum + row.weight, 0);
+  const gate = gateTotal === 0 ? 1 : rows.filter((row) => row.kind === "gate").reduce((sum, row) => sum + (row.passed ? row.weight : 0), 0) / gateTotal;
+  const taskFit = Math.pow(MISS_FACTOR, missed.length + unexpected.length);
+  let score = gate * taskFit;
   const caps: string[] = [];
   const bicycleEvidence = Boolean(scene.wheels) || checks["bicycle frame"] === true;
   const birdEvidence = Boolean(head && beaks.length > 0) || beaks.length > 0 && checks["bird body"] === true;
@@ -294,7 +368,7 @@ export function gradeSvg(answer: unknown, task?: Task): TaskScore {
   if (!birdEvidence) { score = Math.min(score, 0.2); caps.push("no bird with a beak"); }
   const rounded = Math.round(score * 100) / 100;
   const passed = rows.filter((row) => row.passed).map((row) => row.name);
-  const missed = rows.filter((row) => !row.passed).map((row) => row.name);
-  const reason = `Passed: ${passed.join(", ")}. Missed: ${missed.join(", ") || "none"}.${caps.length ? ` Capped: ${caps.join("; ")}.` : ""}`;
-  return { score: rounded, reason, details: { checks: rows.map((row) => ({ ...row, weight: Math.round(row.weight / total * 1000) / 1000 })), caps } as JsonValue };
+  const failedGate = rows.filter((row) => !row.passed && row.kind === "gate").map((row) => row.name);
+  const reason = `Gate ${gate.toFixed(2)} x task fit ${taskFit.toFixed(2)}. Passed: ${passed.join(", ")}. Missed: ${[...failedGate, ...missed].join(", ") || "none"}.${unexpected.length ? ` Unrequested: ${unexpected.join(", ")}.` : ""}${caps.length ? ` Capped: ${caps.join("; ")}.` : ""}`;
+  return { score: rounded, reason, details: { checks: rows, gate: Math.round(gate * 1000) / 1000, taskFit, missed, unexpected, caps } as JsonValue };
 }

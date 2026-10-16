@@ -11,7 +11,7 @@ npx benchmark-pelican run --provider mock
 ```
 
 ```json
-{"model":"mock:1","mean":0.43333333333333335,"confidenceInterval95":{"low":0.26666666666666666,"high":0.6},"totals":{"tasks":30,"passed":13,"failed":0},"checkSummary":[{"check":"two wheels","passRate":1,"meanContribution":1}]}
+{"model":"mock:1","mean":0.43333333333333335,"confidenceInterval95":{"low":0.26666666666666666,"high":0.6},"totals":{"tasks":30,"passed":13,"failed":0},"checkSummary":[{"check":"beak","passRate":1,"meanContribution":1}]}
 ```
 
 The public set has one human-written canonical prompt and 29 tasks from a seeded animal and bicycle grid. The repository script creates every prompt, required-parts list, and mock reference SVG.
@@ -50,7 +50,7 @@ seeded tasks -> model SVG -> safety scan -> geometry checks -> scored report
                                       |-> CLI / SDK / MCP / HTTP API
 ```
 
-The scanner rejects malformed, active, external, or oversized SVG. Weighted checks look for wheels, frame, handlebars, pedals, a bird body, a beak, legs, and useful canvas coverage.
+The scanner rejects malformed, active, external, or oversized SVG. The score multiplies a shared-structure gate by a task-specific fit: each task names its required parts in the prompt, and a missed or unrequested part scales the score down. A drawing of the wrong bird cannot ride the shared checks to a high score.
 
 ## Why it exists
 
@@ -146,7 +146,7 @@ Keep hidden tasks outside the repository and package. Review public data yearly;
 
 ## Limits and known weaknesses
 
-The grader checks structure, not visual truth. It cannot prove species, posture, occlusion, or artistic quality. Carefully chosen abstract geometry can pass.
+The grader checks structure, not visual truth. It verifies that the parts each prompt names are present and shaped plausibly; it cannot prove species, posture, occlusion, or artistic quality. The "does it look like a pelican" question belongs to the optional vision judge, which stays off by default and unscored. Carefully chosen abstract geometry can pass.
 
 Complex transforms, CSS, nested viewports, and unusual path commands can lose credit. Public prompts may enter training data. Remote providers can retain prompts and report cost under their own terms.
 
@@ -166,7 +166,7 @@ Version 0.2.0 is alpha. Task wording and heuristic weights can change before 1.0
 
 ### What does benchmark-pelican measure?
 
-benchmark-pelican measures whether a model can produce safe SVG with plausible bird and bicycle geometry. The headline score is deterministic and structural.
+benchmark-pelican measures whether a model can produce safe SVG with plausible bird and bicycle geometry. The headline score is deterministic and structural: a shared gate times a task-specific fit, so a drawing must match the animal and vehicle the prompt names.
 
 ### How does benchmark-pelican grade an SVG?
 

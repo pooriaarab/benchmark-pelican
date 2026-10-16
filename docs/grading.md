@@ -26,39 +26,53 @@ An honest reply is accepted even when it is not bare markup. The scanner takes t
 
 The answer must stay below 50 KiB. The scanner rejects `script`, `foreignObject`, `image`, `use`, `a`, `style`, and `animate` elements, event attributes, CSS `url()` values that are not local fragments, and non-fragment `href` values. Text content is only allowed inside `title`, `desc`, `text`, and `tspan` elements. Path bounds are computed by replaying `M L H V C S Q T A Z` commands, including relative forms.
 
-## Checks and weights
+## Checks and scoring
 
-Unsafe, oversized, or malformed input receives zero before weighted checks run. Each task's `requiredParts` chooses which part checks apply; the score is the share of total weight passed. Every row in the table exists in `src/svg-grader.ts`.
+Unsafe, oversized, or malformed input receives zero before checks run. The score is multiplicative:
+
+```text
+score = sharedGate x taskFit
+taskFit = 0.4 ^ (missed required task-specific parts + unrequested task-specific parts drawn)
+```
+
+The shared gate holds the checks every task asks for: safe well-formed markup, two wheels, a bicycle frame, handlebars, pedals, a bird body, a bird head, a beak, legs reaching the pedals, and canvas coverage. The task fit holds the parts that change per task: the named animal's beak style, neck, body posture, legs and extras, and the named vehicle's handlebar style, wheel size, wheelbase class, tire class, and extras. A memorised drawing of the wrong bird fails the specific checks instead of coasting on the shared ones, and a drawing that adds parts the task never asked for is penalised the same way.
+
+Each task's `metadata.requiredParts` lists the parts the prompt states; the generator asserts every checked part appears in the prompt text, so a model can draw a full score from the prompt alone. The E2E scores the canonical pelican drawing against every task and requires it to sit far below the reference policy on non-pelican tasks.
+
+### Shared gate checks
 
 | Check | Weight | Evidence |
 | --- | ---: | --- |
 | svg canvas | 0.05 | One `svg` root with positive dimensions or a positive `viewBox` |
 | complexity | 0.08 | 12 to 200 visible geometry elements |
 | coverage | 0.02 | Non-background geometry covers a useful fraction of both axes |
-| svg root | 0.04 | The extracted block parses as one balanced SVG |
 | two wheels | 0.15 | Two separated, similarly sized circles or ellipses in the lower region |
 | bicycle frame | 0.11 | Stroked geometry spanning the gap between the wheels, above wheel centres |
-| handlebars | 0.06 | Stroked geometry above and ahead of the front wheel |
-| drop handlebars | 0.06 | Handlebar-zone stroked path containing a curve command |
-| swept handlebars | 0.06 | Handlebar-zone stroked shape wider than 7% of the canvas |
+| handlebars | 0.06 | Stroked geometry in the front half of the bicycle, below the bird's head |
 | pedals | 0.05 | A small round hub between the wheels, above wheel centres |
-| long wheelbase | 0.04 | Wheel separation above 55% of canvas width (tandems) |
-| second saddle | 0.04 | Two small flat shapes along the frame top |
-| cargo box | 0.05 | A large filled rect or polygon beside a wheel |
-| rear rack | 0.04 | A thin wide rect over the rear wheel |
-| battery pack | 0.04 | A filled rect on the frame between the wheels |
-| knobby tires | 0.05 | Thick wheel strokes or concentric outer rings |
-| small wheels | 0.05 | Wheels under 9% of canvas width (folders, BMX) |
-| bird body | 0.12 | A substantial round or elliptical body above the bicycle |
-| upright body | 0.12 | A body ellipse at least as tall as wide |
+| bird body | 0.12 | The largest substantial round or elliptical body above the bicycle |
 | bird head | 0.07 | A smaller round above and ahead of the body |
-| long neck | 0.05 | A stroked connector spanning head to body |
+| beak | 0.10 | Warm-coloured filled geometry overlapping the head zone |
 | legs reaching the pedals | 0.05 | Stroked geometry descending from the body region to the pedal zone |
-| long legs | 0.04 | Thin or very long leg strokes |
-| tail feathers | 0.04 | Filled geometry behind the body |
-| beak styles | 0.10 | Warm-coloured filled geometry near the head, sized and shaped per style: pouch, curved, large, long pointed, flat, orange, hooked, short, small hooked, thin curved, tall colourful, pointed |
 
-Warm colours mean orange through yellow hues only; cream and near-white fills no longer count. Beak checks read geometry that overlaps the head zone, so a stray warm rectangle elsewhere does not pass.
+### Task-specific checks
+
+Each task requires its own subset, and a passing check the task did not request counts against the fit. Beak and handlebar styles are exclusive: the warm geometry near the head classifies into exactly one beak style, and the bar zone classifies into exactly one bar style, so a drawing can satisfy at most one of each.
+
+| Check | Evidence |
+| --- | --- |
+| beak styles | Exactly one of: pouch, curved, large, long pointed, flat, orange, hooked, short, small hooked, thin curved, tall colourful, pointed |
+| neck | `long neck` (a stroked bridge from body to head) or `short neck` |
+| body posture | `upright body` (at least as tall as wide) or `level body` |
+| long legs | Thin leg strokes longer than 12% of canvas height, or any leg stroke over 27% |
+| tail feathers | Filled geometry with real height behind the body |
+| bar styles | Exactly one of: drop handlebars, swept handlebars, or plain handlebars |
+| wheel size | `small wheels` (under 8% of canvas width) or `full-size wheels` |
+| wheelbase | `long wheelbase` (wheel separation over 60% of canvas width) or `standard wheelbase` |
+| tires | `knobby tires` (thick tread or concentric outer ring), `fat tires` (very thick tread), or `smooth tires` |
+| extras | `second saddle`, `cargo box`, `rear rack`, `battery pack` |
+
+Warm colours mean orange through yellow hues only; cream and near-white fills do not count. Beak checks read geometry that overlaps the head zone, so a stray warm rectangle elsewhere does not pass.
 
 ## Caps
 
@@ -70,6 +84,6 @@ If a drawing shows no bicycle evidence (no wheel pair and no frame) or no bird e
 
 ## Known limits
 
-This grader measures structural plausibility, not visual truth. It cannot prove the species, posture, occlusion, or artistic quality, so a well-formed drawing of the wrong bird can still earn partial credit on tasks whose required parts it happens to satisfy; the hidden split exists for that reason. A valid drawing made mostly with transforms, nested viewports, or CSS can lose credit. Arc bounds are approximated by their endpoints.
+This grader measures structural plausibility, not visual truth. It can claim that the parts each prompt names are present, shaped like the named part, and arranged plausibly; it cannot prove the species, posture, occlusion, or artistic quality. "Does it look like a pelican" belongs to the optional vision judge from the charter, which is not implemented in version 0.2.0 and stays off by default and unscored. A drawing of a different animal that happens to satisfy the same part list can still earn credit, and a valid drawing made mostly with transforms, nested viewports, or CSS can lose credit. Arc bounds are approximated by their endpoints.
 
-The optional vision judge from the charter is not implemented in version 0.2.0. Structural and judged scores must remain separate if a later release adds it.
+Structural and judged scores must remain separate if a later release adds the judge.

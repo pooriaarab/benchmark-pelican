@@ -15,7 +15,7 @@ interface Scene {
   extent: Bounds; width: number; height: number; geometry: { element: Element; bounds: Bounds }[];
   rounds: Round[]; stroked: { element: Element; bounds: Bounds }[];
   sceneShapes: { element: Element; bounds: Bounds }[];
-  wheels: [Round, Round] | undefined; frameTop: number;
+  wheels: [Round, Round] | undefined;
 }
 
 function attributes(source: string): Record<string, string> {
@@ -226,53 +226,59 @@ function scan(answer: string): { scene: Scene } | string {
 
   const geometry = elements.filter((element) => SHAPES.has(element.name)).map((element) => ({ element, bounds: bounds(element) })).filter((item): item is { element: Element; bounds: Bounds } => item.bounds !== undefined);
   // A background rectangle that covers the canvas is decoration, not part of
-  // the drawing, so it never reaches the extent.
+  // the drawing, so it never reaches the figure.
   const canvasWidth = canvas.maxX - canvas.minX, canvasHeight = canvas.maxY - canvas.minY;
   const useful = geometry.filter((item) => !(item.element.name === "rect" && item.bounds.maxX - item.bounds.minX > canvasWidth * 0.9 && item.bounds.maxY - item.bounds.minY > canvasHeight * 0.9));
-  const preliminary = useful.length
+  const usefulExtent = useful.length
     ? useful.reduce((all, item) => ({ minX: Math.min(all.minX, item.bounds.minX), minY: Math.min(all.minY, item.bounds.minY), maxX: Math.max(all.maxX, item.bounds.maxX), maxY: Math.max(all.maxY, item.bounds.maxY) }), { ...useful[0]!.bounds })
     : { ...canvas };
-  const pw = preliminary.maxX - preliminary.minX, ph = preliminary.maxY - preliminary.minY;
   const rounds = geometry.filter(({ element }) => element.name === "circle" || element.name === "ellipse").map((item) => ({ ...item, cx: (item.bounds.minX + item.bounds.maxX) / 2, cy: (item.bounds.minY + item.bounds.maxY) / 2, rx: (item.bounds.maxX - item.bounds.minX) / 2, ry: (item.bounds.maxY - item.bounds.minY) / 2 }));
   const stroked = geometry.filter(({ element }) => element.paint.stroke && element.paint.stroke !== "none");
-  const wheelCandidates = rounds.filter((round) => round.cy > preliminary.minY + ph * 0.5 && round.rx > pw * 0.025 && round.ry > ph * 0.035);
+  // The wheels are the two circles the frame actually connects: a frame line
+  // or path must reach within a half radius of both centres. A loose circle —
+  // a sun, a ball, a hub dot — is never a wheel, whatever its size. Pairs must
+  // be alike in size, roughly level, and clearly separated.
+  const frameStrokes = stroked.filter((item) => item.element.name === "path" || item.element.name === "line" || item.element.name === "polyline");
+  const pairLike = (left: Round, right: Round) => {
+    const big = Math.max(left.rx, right.rx, left.ry, right.ry), small = Math.min(left.rx, right.rx);
+    const sep = right.cx - left.cx;
+    return sep > 0 && !isRing(left, rounds) && !isRing(right, rounds) && big / small <= 1.5 && sep >= (left.rx + right.rx) * 1.2 && Math.abs(left.cy - right.cy) <= big * 0.6;
+  };
+  const connected = (left: Round, right: Round) => {
+    const pad = Math.max(4, Math.max(left.rx, right.rx) * 0.6);
+    const cy = (left.cy + right.cy) / 2;
+    return frameStrokes.some((item) => item.bounds.minX <= left.cx + pad && item.bounds.maxX >= right.cx - pad && item.bounds.minY <= cy + pad && item.bounds.maxY >= cy - pad);
+  };
   let wheels: [Round, Round] | undefined;
-  for (const left of wheelCandidates) for (const right of wheelCandidates) {
-    const ratio = Math.max(left.rx, right.rx) / Math.min(left.rx, right.rx);
-    if (right.cx - left.cx > pw * 0.3 && ratio <= 1.35 && (!wheels || right.cx - left.cx > wheels[1].cx - wheels[0].cx)) wheels = [left, right];
+  for (const left of rounds) for (const right of rounds) {
+    if (right.cx <= left.cx || !pairLike(left, right) || !connected(left, right)) continue;
+    if (!wheels || Math.min(left.rx, right.rx) > Math.min(wheels[0].rx, wheels[1].rx) || (Math.min(left.rx, right.rx) === Math.min(wheels[0].rx, wheels[1].rx) && right.cx - left.cx > wheels[1].cx - wheels[0].cx)) wheels = [left, right];
   }
-  // The drawing's own extent is the bounding box of the connected
-  // bird-plus-vehicle figure only. A long thin horizontal stroke (a ground
-  // line or a horizon) is decoration, and so is a shape farther than one
-  // wheel diameter from the vehicle or the bird, or one that does not touch
-  // the figure at all: a sun or a cloud can come and go without moving a
-  // check. Every geometric check below is measured against this extent or
-  // against named parts inside the scene, never against the canvas or
-  // viewBox, so scaling or translating the scene changes nothing.
-  const wheelSpan = wheels ? wheels[1].cx - wheels[0].cx : 0;
+  if (!wheels) {
+    // Fallback for drawings whose frame misses the hubs: the lowest similar
+    // round pair is still the best wheel guess, so the reasons stay accurate.
+    const low = rounds.filter((round) => round.cy > usefulExtent.minY + (usefulExtent.maxY - usefulExtent.minY) * 0.4);
+    for (const left of low) for (const right of low) {
+      if (right.cx <= left.cx || !pairLike(left, right)) continue;
+      if (!wheels || Math.min(left.rx, right.rx) > Math.min(wheels[0].rx, wheels[1].rx)) wheels = [left, right];
+    }
+  }
+  // The figure is whatever touches the wheels, transitively. Long thin
+  // horizontal strokes or bands — a ground line, a horizon, a sky band — are
+  // decoration and can never join, so widening the canvas or adding a
+  // full-width ground changes nothing. A detached shape — a sun, a cloud —
+  // that does not touch the figure can never join either. Only a shape that
+  // literally overlaps the figure (within a hairline pad for anti-aliasing
+  // gaps) counts as part of the drawing.
+  const wheelbase = wheels ? wheels[1].cx - wheels[0].cx : 0;
+  const diameter = wheels ? Math.max(wheels[0].rx, wheels[1].rx) * 2 : 0;
   const members = useful.filter((item) => {
     const w = item.bounds.maxX - item.bounds.minX, h = item.bounds.maxY - item.bounds.minY;
-    return h > Math.max(6, ph * 0.08) || (w < pw * 0.8 && (!wheels || w < wheelSpan * 1.25));
+    return !(wheels && w > wheelbase * 1.35 && h < w * 0.2);
   });
   let sceneShapes = members;
   if (wheels) {
-    const diameter = Math.max(wheels[0].rx, wheels[1].rx) * 2;
     const pad = Math.max(2, diameter * 0.03);
-    const wheelRegion = {
-      minX: wheels[0].cx - wheels[0].rx, minY: Math.min(wheels[0].bounds.minY, wheels[1].bounds.minY),
-      maxX: wheels[1].cx + wheels[1].rx, maxY: Math.max(wheels[0].bounds.maxY, wheels[1].bounds.maxY),
-    };
-    // The bird anchor is the largest member round above the vehicle — the
-    // body wins it. A shape joins the figure only when it sits within one
-    // wheel diameter of the wheels or of that anchor AND touches what is
-    // already connected (the hairline pad covers anti-aliasing gaps). A sun
-    // or a cloud near the bird fails one test or the other, so decoration
-    // can never join the extent and flip a check.
-    const edgeGap = (a: Bounds, b: Bounds) => Math.max(0, Math.max(a.minX - b.maxX, b.minX - a.maxX, a.minY - b.maxY, b.minY - a.maxY));
-    const anchor = members
-      .filter((item) => (item.element.name === "circle" || item.element.name === "ellipse") && item.element !== wheels[0].element && item.element !== wheels[1].element && (item.bounds.minY + item.bounds.maxY) / 2 < wheelRegion.minY)
-      .reduce<{ element: Element; bounds: Bounds } | undefined>((best, item) => !best || span(item.bounds).w * span(item.bounds).h > span(best.bounds).w * span(best.bounds).h ? item : best, undefined);
-    const near = (b: Bounds) => edgeGap(b, wheelRegion) <= diameter || (anchor !== undefined && edgeGap(b, anchor.bounds) <= diameter);
     const inScene = new Set<number>();
     const queue: number[] = [];
     members.forEach((item, index) => {
@@ -282,17 +288,16 @@ function scan(answer: string): { scene: Scene } | string {
       const item = members[queue.pop()!]!;
       for (let index = 0; index < members.length; index++) {
         if (inScene.has(index)) continue;
-        const b = members[index]!.bounds;
-        if (near(b) && overlap(item.bounds, b, pad)) { inScene.add(index); queue.push(index); }
+        if (overlap(item.bounds, members[index]!.bounds, pad)) { inScene.add(index); queue.push(index); }
       }
     }
     sceneShapes = members.filter((_item, index) => inScene.has(index));
   }
   const extent = sceneShapes.length
     ? sceneShapes.reduce((all, item) => ({ minX: Math.min(all.minX, item.bounds.minX), minY: Math.min(all.minY, item.bounds.minY), maxX: Math.max(all.maxX, item.bounds.maxX), maxY: Math.max(all.maxY, item.bounds.maxY) }), { ...sceneShapes[0]!.bounds })
-    : preliminary;
+    : usefulExtent;
   const width = extent.maxX - extent.minX, height = extent.maxY - extent.minY;
-  return { scene: { extent, width, height, geometry, rounds, stroked, wheels, sceneShapes, frameTop: wheels ? wheels[0].cy - height * 0.08 : extent.minY + height * 0.7 } };
+  return { scene: { extent, width, height, geometry, rounds, stroked, wheels, sceneShapes } };
 }
 
 // Orange through yellow hues; cream and near-white fills do not count as a beak.
@@ -322,6 +327,9 @@ function warm(fill: string | undefined): boolean {
 
 const overlap = (a: Bounds, b: Bounds, pad = 0) => a.minX <= b.maxX + pad && a.maxX >= b.minX - pad && a.minY <= b.maxY + pad && a.maxY >= b.minY - pad;
 const span = (b: Bounds) => ({ w: b.maxX - b.minX, h: b.maxY - b.minY });
+// A concentric outer ring hugging a circle is a tyre ring, not a wheel or a
+// body: the real part is the circle inside it.
+const isRing = (round: Round, rounds: Round[]) => rounds.some((other) => other !== round && Math.abs(other.cx - round.cx) < round.rx * 0.15 && Math.abs(other.cy - round.cy) < round.rx * 0.15 && other.rx > round.rx * 0.7 && other.rx < round.rx);
 
 function sceneChecks(scene: Scene) {
   const { extent, width, height, wheels } = scene;
@@ -332,43 +340,60 @@ function sceneChecks(scene: Scene) {
   const geometry = scene.geometry.filter((item) => member.has(item.element));
   const rounds = scene.rounds.filter((item) => member.has(item.element));
   const stroked = scene.stroked.filter((item) => member.has(item.element));
-  const wheelbase = wheels ? wheels[1].cx - wheels[0].cx : width * 0.5;
-  const between = (item: { bounds: Bounds }) => wheels && item.bounds.minX <= wheels[1].cx && item.bounds.maxX >= wheels[0].cx;
-  const upper = (item: { bounds: Bounds }) => item.bounds.minY < extent.minY + height * 0.55;
-  const bodies = rounds.filter((round) => round.cy < extent.minY + height * 0.55 && round.rx > width * 0.045 && round.ry > height * 0.05 && (!wheels || round.cy < wheels[0].cy - height * 0.1));
-  // The body is the largest upper-region round, so a head circle cannot win.
+  // Every measure is derived from the vehicle's own wheels: R is the larger
+  // wheel radius, WB the distance between the axles, axleY the axle line, and
+  // rearCx/frontCx the two hubs. No check reads the canvas, the viewBox, or
+  // the size of the whole drawing, so decoration and canvas size cannot move
+  // a threshold. When no wheels are found the fallbacks still compute, but
+  // the evidence caps keep the score low anyway.
+  const R = wheels ? Math.max(wheels[0].rx, wheels[1].rx) : Math.max(10, height * 0.15);
+  const WB = wheels ? wheels[1].cx - wheels[0].cx : width * 0.5;
+  const rearCx = wheels ? wheels[0].cx : extent.minX + width * 0.25;
+  const frontCx = wheels ? wheels[1].cx : extent.minX + width * 0.75;
+  const axleY = wheels ? (wheels[0].cy + wheels[1].cy) / 2 : extent.minY + height * 0.8;
+  const between = (item: { bounds: Bounds }) => item.bounds.minX <= frontCx && item.bounds.maxX >= rearCx;
+  const wheelSet = new Set(wheels ? [wheels[0].element, wheels[1].element] : []);
+  const bodies = rounds.filter((round) => !wheelSet.has(round.element) && !isRing(round, rounds) && round.cy < axleY - R * 0.8 && round.rx > R * 0.25 && round.ry > R * 0.25);
+  // The body is the largest substantial round above the vehicle, so a head
+  // circle cannot win.
   const body = bodies.reduce<Round | undefined>((best, round) => !best || round.rx * round.ry > best.rx * best.ry ? round : best, undefined);
-  const head = body && rounds.find((round) => round !== body && round.rx >= width * 0.012 && round.rx <= Math.max(body.rx * 0.75, width * 0.02) && round.ry <= Math.max(body.ry * 0.9, height * 0.03) && round.cy < body.cy - Math.min(4, height * 0.01) && round.cx > body.cx - body.rx * 0.35 && round.cx < extent.maxX);
+  const head = body && rounds.find((round) => round !== body && !wheelSet.has(round.element) && round.rx >= R * 0.08 && round.rx <= Math.max(body.rx * 0.75, R * 0.15) && round.ry <= Math.max(body.ry * 0.9, R * 0.15) && round.cy < body.cy - Math.min(4, R * 0.05) && round.cx > body.cx - body.rx * 0.4 && round.cx < body.cx + body.rx * 3);
   // Warm candidates come from the full geometry: a long beak can reach past
-  // the scene's distance rule and still be a beak. But a beak element must
+  // the figure's distance rule and still be a beak. But a beak element must
   // overlap the head it hangs from — a warm sun or cloud floating near the
   // head never enters the beak union and cannot reclassify it. The only
-  // second hop is a pouch: warm geometry that overlaps an attached beak and
-  // hangs below the head's centre line.
-  const warms = scene.geometry.filter((item) => warm(item.element.paint.fill) && upper(item) && span(item.bounds).w > width * 0.02);
+  // second hop is a pouch: warm geometry that hangs clearly below an attached
+  // beak AND below the head's centre line, so a warm dot inside the beak's own
+  // bounding box cannot turn the beak into a pouch.
+  const warms = scene.geometry.filter((item) => warm(item.element.paint.fill) && item.bounds.minY < axleY - R * 0.3 && span(item.bounds).w > R * 0.1);
   const headPad = head ? { minX: head.bounds.minX - head.rx * 0.2, minY: head.bounds.minY - head.rx * 0.2, maxX: head.bounds.maxX + head.rx * 0.2, maxY: head.bounds.maxY + head.rx * 0.2 } : undefined;
-  const attached = headPad ? warms.filter((item) => overlap(item.bounds, headPad)) : warms;
-  const beaks = head ? warms.filter((item) => attached.includes(item) || attached.some((other) => overlap(item.bounds, other.bounds) && item.bounds.minY > head.cy)) : attached;
-  const pedalZone = wheels ? { minX: wheels[0].cx, minY: wheels[0].cy - height * 0.3, maxX: wheels[1].cx, maxY: wheels[0].cy } : undefined;
-  const legReaches = (item: { bounds: Bounds }, zone: Bounds) => item.bounds.minY > extent.minY + height * 0.28 && item.bounds.minY < extent.minY + height * 0.72 && item.bounds.maxY >= zone.minY + height * 0.12 && item.bounds.maxY <= zone.maxY + height * 0.08 && item.bounds.maxX > zone.minX - width * 0.1 && item.bounds.minX < zone.maxX + width * 0.1;
-  const legsToPedals = Boolean(pedalZone && (stroked.filter((item) => legReaches(item, pedalZone) && (span(item.bounds).h > height * 0.12 || span(item.bounds).w > width * 0.06)).length >= 2 || stroked.some((item) => legReaches(item, pedalZone) && span(item.bounds).h > height * 0.14)));
+  const attached = head && headPad ? warms.filter((item) => overlap(item.bounds, headPad)) : [];
+  // A pouch is a second warm shape that hangs clearly below the head's centre
+  // line and starts under the head or the beak's root — a pelican's throat
+  // pouch. A warm dot at the beak's far edge or inside the beak's own bounds
+  // (a decoration, a sun) can neither be a pouch nor reclassify the beak.
+  const hangsLow = (item: { bounds: Bounds }) => Boolean(head && headPad && item.bounds.minY > head.cy && item.bounds.minX <= headPad.maxX);
+  const hanging = head ? warms.filter((item) => !attached.includes(item) && hangsLow(item) && attached.some((top) => overlap(item.bounds, top.bounds, R * 0.05))) : [];
+  const beaks = [...attached, ...hanging];
+  const pouchParts = beaks.filter((item) => hangsLow(item) && beaks.some((top) => top !== item && item.bounds.maxY > top.bounds.maxY + (head ? head.rx * 0.1 : 0)));
+  // A leg must start above the wheel line and end in the pedal zone: the
+  // strip between the hubs around axle height.
+  const legReaches = (item: { bounds: Bounds }) => item.bounds.minY < axleY - R * 0.8 && item.bounds.maxY >= axleY - R * 1.3 && item.bounds.maxY <= axleY + R * 0.8 && item.bounds.maxX > rearCx - WB * 0.2 && item.bounds.minX < frontCx + WB * 0.2;
+  const legsToPedals = Boolean(wheels && (stroked.filter((item) => legReaches(item) && (span(item.bounds).h > R * 0.5 || span(item.bounds).w > WB * 0.15)).length >= 2 || stroked.some((item) => legReaches(item) && span(item.bounds).h > R * 1.2)));
 
-  const barZone = (item: { bounds: Bounds }) => Boolean(wheels && item.bounds.minY < wheels[0].cy - height * 0.15 && item.bounds.maxY < wheels[0].cy + height * 0.02 && item.bounds.maxX > wheels[1].cx - wheelbase * 0.45 && span(item.bounds).w > width * 0.03);
   // The union of the warm geometry near the head classifies into exactly one
   // beak style, so a drawing can satisfy at most one beak check at a time.
   const beakUnion = beaks.reduce<Bounds | undefined>((all, item) => all ? { minX: Math.min(all.minX, item.bounds.minX), minY: Math.min(all.minY, item.bounds.minY), maxX: Math.max(all.maxX, item.bounds.maxX), maxY: Math.max(all.maxY, item.bounds.maxY) } : item.bounds, undefined);
   const beakDim = beakUnion ? span(beakUnion) : { w: 0, h: 0 };
   const beakHasCurve = beaks.some((item) => item.element.curved);
-  // A pouch is a second warm shape hanging clearly below the rest of the beak.
   const headWidth = head ? head.rx * 2 : 0;
-  const pouch = Boolean(head && beaks.some((item, i) => beaks.some((other, j) => i !== j && overlap(item.bounds, other.bounds, width * 0.02) && other.bounds.minY > item.bounds.minY + head.rx * 0.15)));
   // Every beak measure is relative to the head it hangs on, so the prompt can
   // state each check in plain terms ("a beak about as long as the head is
   // wide") and the same drawing earns the same class at any size.
   const beakStyle = (() => {
     if (!head || beaks.length === 0 || beakUnion === undefined) return undefined;
     const length = beakDim.w / headWidth, depth = beakDim.h / headWidth, ratio = beakDim.w / Math.max(beakDim.h, 1);
-    if (pouch) return "pouch beak";
+    if (pouchParts.length > 0) return "pouch beak";
     if (beakHasCurve) {
       if (length >= 1.2 && depth >= 0.35) return "large beak";
       if (length >= 0.85) return "thin curved beak";
@@ -383,50 +408,64 @@ function sceneChecks(scene: Scene) {
     return "short beak";
   })();
   // Handlebars classify the same way: a drop curl wins, then a wide swept bar,
-  // then a plain bar. Only one bar check can pass per drawing. The zone sits in
-  // the front half of the bicycle and in the band just above the wheel line —
-  // no higher than about half a wheelbase above the axles, as the prompt
-  // states — and warm geometry is never a bar, so beaks, neck strokes and leg
-  // strokes cannot read as handlebars.
-  const barItems = wheels ? stroked.filter((item) => !warm(item.element.paint.fill) && barZone(item) && item.bounds.minX > wheels[0].cx + wheelbase * 0.5 && item.bounds.minY > wheels[0].cy - wheelbase * 0.55) : [];
+  // then a plain bar. Only one bar check can pass per drawing. The zone sits
+  // over the front wheel in the band just above the axle line — no higher
+  // than about half a wheelbase above the axles, as the prompt states — and
+  // warm geometry is never a bar, so beaks, neck strokes and leg strokes
+  // cannot read as handlebars.
+  const barItems = wheels ? stroked.filter((item) => !warm(item.element.paint.fill) && item.bounds.minX > rearCx + WB * 0.45 && item.bounds.maxX > frontCx - WB * 0.45 && item.bounds.minY < axleY - R * 0.4 && item.bounds.maxY < axleY + R * 0.4 && item.bounds.minY > axleY - WB * 0.6 && span(item.bounds).w > R * 0.15) : [];
   const barStyle = barItems.some((item) => item.element.curved && span(item.bounds).h > span(item.bounds).w)
     ? "drop handlebars"
-    : barItems.some((item) => item.element.curved && span(item.bounds).w > width * 0.07)
+    : barItems.some((item) => item.element.curved && span(item.bounds).w > R * 0.5)
       ? "swept handlebars"
       : barItems.length > 0 ? "handlebars" : undefined;
   // Legs are drawn strokes hanging from inside the body toward the pedals;
   // wheels, tails, frame members and cargo boxes do not count. A tail sweeps
   // well left of the body, the frame spans the wheels, and a box sits ahead.
-  const legStrokes = stroked.filter((item) => (item.element.name === "path" || item.element.name === "line" || item.element.name === "polyline") && item.bounds.minY > (body ? body.bounds.minY + body.ry * 0.2 : extent.minY + height * 0.35) && item.bounds.maxY > item.bounds.minY + height * 0.1 && item.bounds.minY < (body ? body.bounds.maxY + height * 0.06 : extent.minY + height * 0.7) && (!body || (item.bounds.minX > body.bounds.minX - width * 0.05 && item.bounds.maxX <= body.bounds.maxX + width * 0.1)));
+  const legStrokes = stroked.filter((item) => (item.element.name === "path" || item.element.name === "line" || item.element.name === "polyline") && item.bounds.minY > (body ? body.bounds.minY + body.ry * 0.2 : axleY - R * 3) && item.bounds.maxY > item.bounds.minY + R * 0.6 && item.bounds.minY < (body ? body.bounds.maxY + R * 0.4 : axleY - R) && (!body || (item.bounds.minX > body.bounds.minX - R * 0.4 && item.bounds.maxX <= body.bounds.maxX + R * 0.7)));
 
   // Long legs dangle: a thin leg stroke that leaves the body and drops clearly
   // below the wheel axles, the way a wading bird's legs hang off a bicycle.
   const longLeg = Boolean(wheels) && legStrokes.some((item) => {
     const h = span(item.bounds).h;
     const strokeWidth = number(item.element.paint["stroke-width"]) ?? h * 0.5;
-    return strokeWidth <= h * 0.15 && item.bounds.maxY >= wheels![0].cy + wheels![0].rx * 0.15;
+    return strokeWidth <= h * 0.15 && item.bounds.maxY >= axleY + R * 0.15;
   });
 
   const knobby = Boolean(wheels && (wheelThickness(wheels![0]) || wheelThickness(wheels![1])));
   // A neck is a stroke bridging body to head that starts behind the head, so a
   // pouch or beak hanging ahead of the head cannot count.
-  const neckStroke = body && head && stroked.find((item) => item.bounds !== head.bounds && item.bounds !== body.bounds && span(item.bounds).h > body.ry * 0.4 && span(item.bounds).w < wheelbase * 0.6 && item.bounds.minX < head.cx && item.bounds.minY <= head.bounds.maxY + height * 0.05 && item.bounds.maxY >= body.bounds.minY - height * 0.05 && item.bounds.minY < body.bounds.minY);
+  const neckStroke = body && head && stroked.find((item) => item.bounds !== head.bounds && item.bounds !== body.bounds && span(item.bounds).h > body.ry * 0.4 && span(item.bounds).w < WB * 0.6 && item.bounds.minX < head.cx && item.bounds.minY <= head.bounds.maxY + R * 0.3 && item.bounds.maxY >= body.bounds.minY - R * 0.3 && item.bounds.minY < body.bounds.minY);
+  // A saddle is a small flat filled seat shape above the frame line, over the
+  // rear wheel or between the wheels: ellipse, rect, or a filled path all
+  // read as a seat. It is narrower than a wheel — a wider flat shape over the
+  // rear wheel reads as a rack instead — and thinner than a box, so a battery
+  // pack (at least a third as tall as it is wide) never counts.
+  const saddleLike = (item: { element: Element; bounds: Bounds }) => {
+    const { w, h } = span(item.bounds);
+    if (w < R * 0.12 || w > R * 0.95 || h > Math.min(w * 0.6, R * 0.3)) return false;
+    if (warm(item.element.paint.fill)) return false;
+    const pathLike = item.element.name === "path" || item.element.name === "line" || item.element.name === "polyline";
+    if (pathLike ? item.element.attrs.fill === undefined || item.element.attrs.fill === "none" : item.element.paint.fill === "none") return false;
+    const cx = (item.bounds.minX + item.bounds.maxX) / 2, cy = (item.bounds.minY + item.bounds.maxY) / 2;
+    return cx > rearCx - WB * 0.35 && cx < frontCx + WB * 0.1 && cy < axleY - R * 0.6 && cy > axleY - R * 3;
+  };
   const checks: Record<string, boolean> = {
     "two wheels": Boolean(wheels),
-    "bicycle frame": Boolean(wheels && stroked.some((item) => between(item) && span(item.bounds).w > wheelbase * 0.4 && item.bounds.minY < scene.frameTop)),
+    "bicycle frame": Boolean(wheels && stroked.some((item) => between(item) && span(item.bounds).w > WB * 0.4 && item.bounds.minY < axleY - R * 0.5)),
     "handlebars": barItems.length > 0,
-    "pedals": Boolean(wheels && geometry.some((item) => span(item.bounds).w <= wheels![0].rx * 1.1 && span(item.bounds).h <= wheels![0].rx * 1.1 && item.bounds.minX > wheels![0].cx && item.bounds.maxX < wheels![1].cx && (item.bounds.minY + item.bounds.maxY) / 2 > wheels![0].cy - height * 0.25 && (item.bounds.minY + item.bounds.maxY) / 2 < wheels![0].cy + wheels![0].rx * 0.6)),
+    "pedals": Boolean(wheels && geometry.some((item) => !wheelSet.has(item.element) && span(item.bounds).w <= R * 1.2 && span(item.bounds).h <= R * 1.2 && item.bounds.minX > rearCx && item.bounds.maxX < frontCx && (item.bounds.minY + item.bounds.maxY) / 2 > axleY - R * 1.6 && (item.bounds.minY + item.bounds.maxY) / 2 < axleY + R * 0.8)),
     "bird body": Boolean(body),
     "bird head": Boolean(head),
     "beak": beaks.length > 0,
     "legs reaching the pedals": legsToPedals,
     // Task-specific bird parts: the named animal's own cues.
     "long neck": Boolean(neckStroke),
-    "short neck": Boolean(body && head && !neckStroke && head.bounds.maxY >= body.bounds.minY - height * 0.02),
+    "short neck": Boolean(body && head && !neckStroke && head.bounds.maxY >= body.bounds.minY - R * 0.2),
     "upright body": Boolean(body && body.ry >= body.rx * 0.9),
     "level body": Boolean(body && body.ry < body.rx * 0.9),
     "long legs": longLeg,
-    "tail feathers": Boolean(body && geometry.some((item) => item.element.paint.fill !== "none" && item.bounds.maxX < body.bounds.minX + width * 0.06 && span(item.bounds).w > width * 0.04 && span(item.bounds).h > height * 0.05 && item.bounds.minY > body.bounds.minY && item.bounds.minY <= body.bounds.maxY)),
+    "tail feathers": Boolean(body && geometry.some((item) => item.element.paint.fill !== "none" && item.bounds.maxX < body.bounds.minX + body.rx * 0.35 && item.bounds.maxX > body.bounds.minX - body.rx * 1.5 && span(item.bounds).w > R * 0.2 && span(item.bounds).h > R * 0.2 && item.bounds.minY > body.bounds.minY && item.bounds.minY <= body.bounds.maxY)),
     // Beak styles are exclusive: one drawing has exactly one beak shape.
     "pouch beak": beakStyle === "pouch beak",
     "large beak": beakStyle === "large beak",
@@ -440,31 +479,25 @@ function sceneChecks(scene: Scene) {
     // Task-specific bicycle parts: the named vehicle's own cues.
     "drop handlebars": barStyle === "drop handlebars",
     "swept handlebars": barStyle === "swept handlebars",
-    // Wheel size is measured against the scene's height, so a wider drawing or
-    // a longer beak cannot make the same wheels look smaller.
-    "small wheels": Boolean(wheels && wheels[0].rx < height * 0.14 && wheels[1].rx < height * 0.14),
-    "full-size wheels": Boolean(wheels && wheels[0].rx >= height * 0.14 && wheels[1].rx >= height * 0.14),
+    // Wheel size is measured against the wheelbase, as the prompt states:
+    // small wheels have a radius under a seventh of the axle distance.
+    "small wheels": Boolean(wheels && wheels[0].rx < WB / 7 && wheels[1].rx < WB / 7),
+    "full-size wheels": Boolean(wheels && wheels[0].rx >= WB / 7 && wheels[1].rx >= WB / 7),
     "knobby tires": knobby,
     "smooth tires": Boolean(wheels) && !knobby,
     "fat tires": Boolean(wheels && (fatTires(wheels![0]) || fatTires(wheels![1]))),
-    // A saddle is any small flat seat shape between the wheels in the saddle
-    // band — an ellipse or a flat rect both read as a seat. Two of them mean
-    // a second rider position, as the prompt states for a tandem.
-    "second saddle": Boolean(wheels && geometry.filter((item) => {
-      const { w, h } = span(item.bounds);
-      if (item.element.name !== "circle" && item.element.name !== "ellipse" && item.element.name !== "rect") return false;
-      if (w <= width * 0.02 || w >= wheels![0].rx || h > w * 0.55) return false;
-      const cx = (item.bounds.minX + item.bounds.maxX) / 2, cy = (item.bounds.minY + item.bounds.maxY) / 2;
-      return cx > wheels![0].cx && cx < wheels![1].cx && cy > wheels![0].cy - height * 0.3 && cy < wheels![0].cy - height * 0.12;
-    }).length >= 2),
-    "cargo box": Boolean(wheels && geometry.some((item) => (item.element.name === "rect" || item.element.name === "polygon") && item.element.paint.fill !== "none" && span(item.bounds).w > width * 0.08 && span(item.bounds).h > height * 0.1 && item.bounds.minY < wheels![0].cy - height * 0.05 && item.bounds.minY > wheels![0].cy - height * 0.55 && overlap(item.bounds, { minX: wheels![0].cx - width * 0.08, minY: extent.minY, maxX: wheels![1].cx + width * 0.12, maxY: extent.maxY }))),
-    "rear rack": Boolean(wheels && geometry.some((item) => item.element.name === "rect" && span(item.bounds).w > width * 0.07 && span(item.bounds).h < height * 0.06 && item.bounds.maxX < wheels![0].cx + wheels![0].rx + width * 0.06 && item.bounds.minY > wheels![0].bounds.minY - height * 0.12 && item.bounds.maxY < wheels![0].cy)),
-    "battery pack": Boolean(wheels && geometry.some((item) => item.element.name === "rect" && item.element.paint.fill !== "none" && span(item.bounds).w >= wheels![0].rx * 0.9 && span(item.bounds).h > height * 0.03 && item.bounds.minX > wheels![0].cx && item.bounds.maxX < wheels![1].cx && item.bounds.maxY < wheels![0].cy && item.bounds.minY > extent.minY + height * 0.25)),
+    "second saddle": Boolean(wheels && geometry.filter(saddleLike).length >= 2),
+    "cargo box": Boolean(wheels && geometry.some((item) => (item.element.name === "rect" || item.element.name === "polygon") && item.element.paint.fill !== "none" && span(item.bounds).w > R * 0.8 && span(item.bounds).h > R * 0.5 && item.bounds.minX < frontCx + R && item.bounds.maxX > frontCx - R && item.bounds.minY < axleY - R && item.bounds.maxY < axleY - R * 0.3)),
+    // A rack is a wide thin shelf right over the rear wheel, at least as wide
+    // as a wheel: a smaller flat shape in the same spot reads as a saddle.
+    "rear rack": Boolean(wheels && geometry.some((item) => item.element.name === "rect" && item.element.paint.fill !== "none" && span(item.bounds).w >= R && span(item.bounds).h <= R * 0.4 && span(item.bounds).w > span(item.bounds).h * 3 && Math.abs((item.bounds.minX + item.bounds.maxX) / 2 - rearCx) <= WB * 0.35 && item.bounds.minY > axleY - R * 2.5 && item.bounds.minY < wheels![0].bounds.minY - R * 0.05 && item.bounds.maxY < axleY - R * 0.3)),
+    "battery pack": Boolean(wheels && geometry.some((item) => item.element.name === "rect" && item.element.paint.fill !== "none" && span(item.bounds).w >= R * 0.9 && span(item.bounds).h >= Math.max(R * 0.3, span(item.bounds).w * 0.3) && item.bounds.minX > rearCx - WB * 0.1 && item.bounds.maxX < frontCx + WB * 0.1 && item.bounds.maxY < axleY - R * 0.2 && item.bounds.minY > axleY - R * 2.8)),
   };
   function wheelThickness(wheel: Round) {
     const strokeWidth = number(wheel.element.paint["stroke-width"]) ?? 0;
-    // Knobby tread shows as a thick tyre wall, a dashed tread line, or a
-    // concentric outer ring hugging the rim.
+    // Knobby tread shows as a tyre wall at least 0.28 times the wheel radius
+    // thick — thicker is fine — a dashed tread line, or a concentric outer
+    // ring hugging the rim.
     return strokeWidth >= wheel.rx * 0.28
       || (wheel.element.paint["stroke-dasharray"] !== undefined && wheel.element.paint["stroke-dasharray"] !== "none")
       || rounds.some((round) => round !== wheel && Math.abs(round.cx - wheel.cx) < wheel.rx * 0.15 && Math.abs(round.cy - wheel.cy) < wheel.rx * 0.15 && round.rx > wheel.rx && round.rx < wheel.rx * 1.3);
@@ -518,11 +551,14 @@ export function gradeSvg(answer: unknown, task?: Task): TaskScore {
   }
   // Shared base rows ride along in the gate as well.
   for (const [name, weight] of BASE_CHECKS) {
-    const passed = name === "svg canvas" ? true : name === "complexity" ? geometry.length >= 12 && geometry.length <= 200 : Boolean(width > 0 && height > 0 && width >= height * 0.8 && height >= width * 0.2);
+    const passed = name === "svg canvas" ? true : name === "complexity" ? scene.sceneShapes.length >= 8 && scene.sceneShapes.length <= 200 : Boolean(width > 0 && height > 0 && width >= height * 0.8 && height >= width * 0.2);
     rows.push({ name, weight, passed, kind: "gate" });
   }
   // Unrequested task-specific parts that were drawn anyway count against fit.
-  const unexpected = [...SPECIFIC_CHECKS].filter((name) => !parts.includes(name) && checks[name] === true);
+  // A fat tire is a stronger form of a rugged tire, so when a task asks for
+  // knobby tires an even thicker stroke is not an unrequested part.
+  const implied: Record<string, string[]> = { "fat tires": ["knobby tires"] };
+  const unexpected = [...SPECIFIC_CHECKS].filter((name) => !parts.includes(name) && checks[name] === true && !(implied[name] ?? []).some((weaker) => parts.includes(weaker)));
   const gateTotal = rows.filter((row) => row.kind === "gate").reduce((sum, row) => sum + row.weight, 0);
   const gate = gateTotal === 0 ? 1 : rows.filter((row) => row.kind === "gate").reduce((sum, row) => sum + (row.passed ? row.weight : 0), 0) / gateTotal;
   const taskFit = Math.pow(MISS_FACTOR, missed.length + unexpected.length);

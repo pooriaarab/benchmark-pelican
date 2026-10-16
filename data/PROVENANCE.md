@@ -19,5 +19,5 @@ This file is generated from the benchmark definition.
 - Licence: `MIT`
 - Retrieved: 2026-10-15T00:00:00.000Z
 - How to get it: Run `node scripts/gen-tasks.mjs --seed 20261015 --split public` from the repository root.
-- Contamination notes: Public seed 20261015 has a 2026-10-15 cutoff. Generate a private-seed hidden split and keep it outside the repository and npm package.
-- Refresh: Review yearly. Change the public seed only for a declared data version; generate hidden tasks with `--seed N --split hidden`.
+- Contamination notes: Public seed 20261015 has a 2026-10-15 cutoff. Generate a private-seed hidden split with `--seed N --split hidden`; its default output path is hidden/, outside data/ and outside the npm package.
+- Refresh: Review yearly. Change the public seed only for a declared data version; generate hidden tasks with `--seed N --split hidden` and run them with `--tasks <path>`.

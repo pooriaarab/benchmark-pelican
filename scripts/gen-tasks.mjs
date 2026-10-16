@@ -205,10 +205,11 @@ function birdSvg(spec, wheels, random, palette) {
   parts.push(`<circle cx="${hx}" cy="${hy}" r="${hr}" fill="${palette.body}" stroke="#33343a" stroke-width="5"/>`);
   parts.push(`<circle cx="${hx + 14}" cy="${hy - 10}" r="5" fill="#22252b"/>`);
   parts.push(beakSvg(spec.beak, head, palette.beak));
-  // Long-legged birds let their thin legs dangle below the wheel axles, the
-  // way a wading bird's legs hang off a bicycle; other birds reach the pedals.
+  // Long-legged birds let their thin legs dangle at least half a wheel radius
+  // below the wheel axles, the way a wading bird's legs hang off a bicycle;
+  // other birds reach the pedals.
   const legY = bodyCy + bodyRy - 6;
-  const legEnd = spec.legs === "long legs" ? round(wheels.wheels.cy + wheels.wheels.radius * 0.3) : wheels.bbY - 2;
+  const legEnd = spec.legs === "long legs" ? round(wheels.wheels.cy + wheels.wheels.radius * 0.7) : wheels.bbY - 2;
   const legStroke = spec.legs === "long legs" ? 6 : 13;
   const legSpread = upright ? 30 : 44;
   parts.push(`<path d="M${bx - legSpread} ${legY}Q${bx - legSpread - 8} ${round((legY + legEnd) / 2)} ${bx - legSpread + 10} ${legEnd}M${bx + legSpread - 14} ${legY + 4}Q${bx + legSpread - 4} ${round((legY + legEnd) / 2)} ${bx + legSpread + 12} ${legEnd}" fill="none" stroke="${palette.legs}" stroke-width="${legStroke}" stroke-linecap="round"/>`);

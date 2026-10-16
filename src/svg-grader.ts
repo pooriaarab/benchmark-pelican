@@ -424,12 +424,14 @@ function sceneChecks(scene: Scene) {
   // well left of the body, the frame spans the wheels, and a box sits ahead.
   const legStrokes = stroked.filter((item) => (item.element.name === "path" || item.element.name === "line" || item.element.name === "polyline") && item.bounds.minY > (body ? body.bounds.minY + body.ry * 0.2 : axleY - R * 3) && item.bounds.maxY > item.bounds.minY + R * 0.6 && item.bounds.minY < (body ? body.bounds.maxY + R * 0.4 : axleY - R) && (!body || (item.bounds.minX > body.bounds.minX - R * 0.4 && item.bounds.maxX <= body.bounds.maxX + R * 0.7)));
 
-  // Long legs dangle: a thin leg stroke that leaves the body and drops clearly
-  // below the wheel axles, the way a wading bird's legs hang off a bicycle.
+  // Long legs dangle: a thin leg stroke that leaves the body and drops at
+  // least half a wheel radius below the wheel axles, the way a wading bird's
+  // legs hang off a bicycle. A leg that merely reaches the pedals — anywhere
+  // near the axle line, as the prompts state — is not a long leg.
   const longLeg = Boolean(wheels) && legStrokes.some((item) => {
     const h = span(item.bounds).h;
     const strokeWidth = number(item.element.paint["stroke-width"]) ?? h * 0.5;
-    return strokeWidth <= h * 0.15 && item.bounds.maxY >= axleY + R * 0.15;
+    return strokeWidth <= h * 0.15 && item.bounds.maxY >= axleY + R * 0.5;
   });
 
   const knobby = Boolean(wheels && (wheelThickness(wheels![0]) || wheelThickness(wheels![1])));
@@ -450,9 +452,23 @@ function sceneChecks(scene: Scene) {
     const cx = (item.bounds.minX + item.bounds.maxX) / 2, cy = (item.bounds.minY + item.bounds.maxY) / 2;
     return cx > rearCx - WB * 0.35 && cx < frontCx + WB * 0.1 && cy < axleY - R * 0.6 && cy > axleY - R * 3;
   };
+  // The frame's top tube is the highest point of a frame stroke — a long
+  // stroked line, path, or polyline spanning the wheels, never a filled
+  // ellipse (a bird's body is wide enough to fake a frame otherwise). A
+  // small filled shape within a wheel radius of it is seat hardware — a
+  // saddle, a seat post top — never a tail, no matter where a narrow
+  // upright body happens to sit.
+  const frameMembers = stroked.filter((item) => item.element.name === "path" || item.element.name === "line" || item.element.name === "polyline");
+  const frameTop = frameMembers
+    .filter((item) => between(item) && span(item.bounds).w > WB * 0.4 && item.bounds.minY < axleY - R * 0.5)
+    .reduce((top, item) => Math.min(top, item.bounds.minY), Infinity);
+  const seatHardware = (item: { bounds: Bounds }) => {
+    const { w, h } = span(item.bounds);
+    return Number.isFinite(frameTop) && w <= R * 2 && h <= R * 0.5 && Math.abs(item.bounds.minY - frameTop) <= R;
+  };
   const checks: Record<string, boolean> = {
     "two wheels": Boolean(wheels),
-    "bicycle frame": Boolean(wheels && stroked.some((item) => between(item) && span(item.bounds).w > WB * 0.4 && item.bounds.minY < axleY - R * 0.5)),
+    "bicycle frame": Boolean(wheels && frameMembers.some((item) => between(item) && span(item.bounds).w > WB * 0.4 && item.bounds.minY < axleY - R * 0.5)),
     "handlebars": barItems.length > 0,
     "pedals": Boolean(wheels && geometry.some((item) => !wheelSet.has(item.element) && span(item.bounds).w <= R * 1.2 && span(item.bounds).h <= R * 1.2 && item.bounds.minX > rearCx && item.bounds.maxX < frontCx && (item.bounds.minY + item.bounds.maxY) / 2 > axleY - R * 1.6 && (item.bounds.minY + item.bounds.maxY) / 2 < axleY + R * 0.8)),
     "bird body": Boolean(body),
@@ -465,7 +481,11 @@ function sceneChecks(scene: Scene) {
     "upright body": Boolean(body && body.ry >= body.rx * 0.9),
     "level body": Boolean(body && body.ry < body.rx * 0.9),
     "long legs": longLeg,
-    "tail feathers": Boolean(body && geometry.some((item) => item.element.paint.fill !== "none" && item.bounds.maxX < body.bounds.minX + body.rx * 0.35 && item.bounds.maxX > body.bounds.minX - body.rx * 1.5 && span(item.bounds).w > R * 0.2 && span(item.bounds).h > R * 0.2 && item.bounds.minY > body.bounds.minY && item.bounds.minY <= body.bounds.maxY)),
+    // A tail is a real fan: taller than two fifths of a wheel radius and
+    // trailing just behind the body. Small shapes near the frame's top tube
+    // are seat hardware, so a saddle under a narrow upright body never reads
+    // as a tail.
+    "tail feathers": Boolean(body && geometry.some((item) => item.element.paint.fill !== "none" && item.bounds.maxX < body.bounds.minX + body.rx * 0.35 && item.bounds.maxX > body.bounds.minX - body.rx * 1.5 && span(item.bounds).w > R * 0.2 && span(item.bounds).h > R * 0.4 && item.bounds.minY > body.bounds.minY && item.bounds.minY <= body.bounds.maxY && !seatHardware(item))),
     // Beak styles are exclusive: one drawing has exactly one beak shape.
     "pouch beak": beakStyle === "pouch beak",
     "large beak": beakStyle === "large beak",

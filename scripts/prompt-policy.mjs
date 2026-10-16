@@ -6,9 +6,10 @@
 // its score measures whether the prompts really carry enough information.
 //
 // Everything is a fraction of the requested canvas, so the same prompt draws
-// correctly at any size. Whether a ground line is drawn — none, a thin line,
-// or a thin band — comes from a hash of the prompt text, which also proves
-// incidental decoration cannot move the score.
+// correctly at any size. A seeded stream keyed on the prompt text and canvas
+// size jitters what the prompt leaves open: leg bottoms land anywhere in
+// [-0.2R, +0.3R] of the axle line, body and handlebar proportions wander, and
+// the ground is drawn as nothing, a thin line, or a thin band.
 
 const BEAKS = ["pouch beak", "long pointed beak", "thin curved beak", "tall colourful beak", "large beak", "pointed beak", "flat beak", "hooked beak", "short beak"];
 const PAIRS = [
@@ -76,11 +77,24 @@ export function transformSvg(svg, s = 1, dx = 0, dy = 0) {
 
 const px = (v) => Math.round(v * 10) / 10;
 
+// A small deterministic stream seeded on the prompt text and the canvas, so
+// the jitter is stable per task but independent of the task generator's seed
+// schedule.
+function stream(prompt, w, h) {
+  let state = (2166136261 ^ w ^ (h << 8)) >>> 0;
+  for (const ch of prompt) { state ^= ch.codePointAt(0); state = Math.imul(state, 16777619) >>> 0; }
+  return () => {
+    state = (Math.imul(state, 1103515245) + 12345) >>> 0;
+    return state / 4294967296;
+  };
+}
+
 // Draws what the prompt literally asks for, on a blank side-view layout: two
 // wheels low on the canvas, a simple frame between the hubs, and a bird
-// perched over the middle. Every number comes from the prompt's own words or
-// an ordinary guess — nothing here knows what the grader measures beyond what
-// the prompt states.
+// perched over the middle. Every fixed number comes from the prompt's own
+// words or an ordinary guess — nothing here knows what the grader measures
+// beyond what the prompt states. What the prompt does not state gets a seeded
+// jitter, so a lucky proportion cannot hide a missing check.
 export function promptOnlySvg(prompt, canvasW = 1000, canvasH = 600) {
   const beak = named(prompt, BEAKS) ?? "pointed beak";
   const neck = named(prompt, PAIRS[0]) ?? "short neck";
@@ -89,29 +103,35 @@ export function promptOnlySvg(prompt, canvasW = 1000, canvasH = 600) {
   const wheelSize = named(prompt, PAIRS[3]) ?? "full-size wheels";
   const tires = named(prompt, PAIRS[4]) ?? "smooth tires";
   const flags = Object.fromEntries(FLAGS.map((flag) => [flag, prompt.toLowerCase().includes(flag)]));
-  const ground = [...prompt].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % 3;
+  const rand = stream(prompt, canvasW, canvasH);
+  const at = (lo, hi) => lo + (hi - lo) * rand();
+  const ground = Math.floor(rand() * 3);
 
   const W = canvasW, H = canvasH;
-  const rearX = W * 0.25, frontX = W * 0.75, axleY = H * 0.76;
+  const rearX = W * at(0.22, 0.28), frontX = W * at(0.72, 0.78), axleY = H * at(0.72, 0.8);
   const wheelbase = frontX - rearX;
   // "Small wheels" are a radius under a seventh of the wheelbase, so draw
   // them at about a ninth; full-size wheels get ordinary proportions.
-  const wheelR = wheelSize === "small wheels" ? wheelbase / 9 : wheelbase / 5;
-  const tyreW = tires === "fat tires" ? wheelR * 0.45 : tires === "knobby tires" ? wheelR * 0.14 : wheelR * 0.1;
+  const wheelR = wheelSize === "small wheels" ? wheelbase / at(8, 10) : wheelbase / at(4.5, 5.5);
+  // Tire walls: the prompts state 0.28R for a rugged tread and a third for a
+  // fat tire; a smooth tire is just a rim stroke.
+  const tyreW = tires === "fat tires" ? wheelR * at(0.38, 0.5) : tires === "knobby tires" ? wheelR * at(0.3, 0.4) : wheelR * at(0.08, 0.15);
   const ink = "#33322e", warmBeak = "#f0a030", plumage = "#dde6ee", wingC = "#a8bfd0", legC = "#d9a94a";
 
-  const crankX = W * 0.5, crankY = axleY - wheelR * 0.4;
-  const seatX = rearX + wheelbase * 0.35, seatY = axleY - wheelR * 1.7;
-  const headTubeX = frontX - wheelbase * 0.13, headTubeY = axleY - wheelR * 2.1;
+  const crankX = W * at(0.47, 0.53), crankY = axleY - wheelR * at(0.1, 0.4);
+  const seatX = rearX + wheelbase * at(0.3, 0.4), seatY = axleY - wheelR * at(1.4, 1.9);
+  const headTubeX = frontX - wheelbase * at(0.1, 0.16), headTubeY = axleY - wheelR * at(1.8, 2.3);
 
   const upright = posture === "upright body";
-  const bodyRx = upright ? W * 0.05 : W * 0.09;
-  const bodyRy = upright ? H * 0.11 : H * 0.055;
-  const bodyX = W * 0.42, bodyY = axleY - wheelR * 3.4;
-  const headR = W * 0.026;
+  // "Taller than it is wide" and "wider than it is tall" are the only stated
+  // body numbers; the sizes themselves are a guess, jittered per prompt.
+  const bodyRx = (upright ? W * 0.05 : W * 0.09) * at(0.85, 1.2);
+  const bodyRy = upright ? bodyRx * at(1.15, 1.5) : bodyRx * at(0.5, 0.75);
+  const bodyX = W * at(0.38, 0.46), bodyY = axleY - wheelR * at(2.8, 3.6);
+  const headR = Math.min(W * at(0.02, 0.028), bodyRx * 0.55);
   const longNeck = neck === "long neck";
-  const headX = bodyX + bodyRx + headR * (longNeck ? 2.2 : 0.5);
-  const headY = bodyY - bodyRy - headR * (longNeck ? 1.8 : 0.4);
+  const headX = bodyX + bodyRx + headR * (longNeck ? at(1.8, 2.6) : at(0.3, 0.7));
+  const headY = bodyY - bodyRy - headR * (longNeck ? at(1.5, 2.1) : at(0.2, 0.5));
 
   const svg = [];
   if (ground === 1) svg.push(`<line x1="0" y1="${px(axleY + wheelR + H * 0.04)}" x2="${W}" y2="${px(axleY + wheelR + H * 0.04)}" stroke="#9aa38f" stroke-width="${px(H * 0.008)}"/>`);
@@ -127,18 +147,18 @@ export function promptOnlySvg(prompt, canvasW = 1000, canvasH = 600) {
   svg.push(`<path d="M${px(rearX)} ${px(axleY)}L${px(crankX)} ${px(crankY)}L${px(frontX)} ${px(axleY)}M${px(crankX)} ${px(crankY)}L${px(seatX)} ${px(seatY)}M${px(headTubeX)} ${px(headTubeY)}L${px(frontX)} ${px(axleY)}M${px(headTubeX)} ${px(headTubeY)}L${px(crankX)} ${px(crankY)}" fill="none" stroke="#5a6472" stroke-width="${px(wheelR * 0.14)}" stroke-linejoin="round"/>`);
   // Saddles: small flat seats above the frame line.
   svg.push(`<ellipse cx="${px(seatX)}" cy="${px(seatY - wheelR * 0.15)}" rx="${px(wheelR * 0.4)}" ry="${px(wheelR * 0.12)}" fill="${ink}"/>`);
-  if (flags["second saddle"]) svg.push(`<ellipse cx="${px(rearX + wheelbase * 0.68)}" cy="${px(seatY - wheelR * 0.15)}" rx="${px(wheelR * 0.4)}" ry="${px(wheelR * 0.12)}" fill="${ink}"/>`);
+  if (flags["second saddle"]) svg.push(`<ellipse cx="${px(rearX + wheelbase * at(0.62, 0.72))}" cy="${px(seatY - wheelR * 0.15)}" rx="${px(wheelR * 0.4)}" ry="${px(wheelR * 0.12)}" fill="${ink}"/>`);
   // A small crank and pedals between the wheels near axle height.
   svg.push(`<circle cx="${px(crankX)}" cy="${px(crankY)}" r="${px(wheelR * 0.18)}" fill="${ink}"/>`);
   svg.push(`<path d="M${px(crankX)} ${px(crankY)}l${px(-wheelR * 0.3)} ${px(wheelR * 0.35)}M${px(crankX)} ${px(crankY)}l${px(wheelR * 0.3)} ${px(wheelR * 0.3)}" fill="none" stroke="${ink}" stroke-width="${px(wheelR * 0.08)}"/>`);
-  // Handlebars above the front wheel.
-  const barTopX = headTubeX + W * 0.008, barTopY = headTubeY - wheelR * 0.4;
+  // Handlebars above the front wheel, inside the band the prompt states.
+  const barTopX = headTubeX + W * at(-0.01, 0.02), barTopY = headTubeY - wheelR * at(0.25, 0.5);
   if (bars === "drop handlebars") {
     svg.push(`<path d="M${px(headTubeX)} ${px(headTubeY)}L${px(barTopX)} ${px(barTopY)}q${px(wheelR * 0.15)} ${px(wheelR * 0.05)} ${px(wheelR * 0.15)} ${px(wheelR * 0.35)}q0 ${px(wheelR * 0.16)} ${px(-wheelR * 0.16)} ${px(wheelR * 0.18)}" fill="none" stroke="${ink}" stroke-width="${px(wheelR * 0.09)}" stroke-linecap="round"/>`);
   } else if (bars === "swept handlebars") {
-    svg.push(`<path d="M${px(headTubeX)} ${px(headTubeY)}L${px(barTopX)} ${px(barTopY)}q${px(-wheelR * 0.6)} ${px(-wheelR * 0.05)} ${px(-wheelR * 0.75)} ${px(wheelR * 0.22)}" fill="none" stroke="${ink}" stroke-width="${px(wheelR * 0.09)}" stroke-linecap="round"/>`);
+    svg.push(`<path d="M${px(headTubeX)} ${px(headTubeY)}L${px(barTopX)} ${px(barTopY)}q${px(-wheelR * at(0.5, 0.7))} ${px(-wheelR * 0.05)} ${px(-wheelR * at(0.7, 0.85))} ${px(wheelR * 0.22)}" fill="none" stroke="${ink}" stroke-width="${px(wheelR * 0.09)}" stroke-linecap="round"/>`);
   } else {
-    svg.push(`<path d="M${px(headTubeX)} ${px(headTubeY)}L${px(barTopX)} ${px(barTopY)}M${px(barTopX - wheelR * 0.35)} ${px(barTopY - wheelR * 0.15)}L${px(barTopX + wheelR * 0.4)} ${px(barTopY + wheelR * 0.15)}" fill="none" stroke="${ink}" stroke-width="${px(wheelR * 0.09)}" stroke-linecap="round"/>`);
+    svg.push(`<path d="M${px(headTubeX)} ${px(headTubeY)}L${px(barTopX)} ${px(barTopY)}M${px(barTopX - wheelR * at(0.3, 0.4))} ${px(barTopY - wheelR * at(0.1, 0.2))}L${px(barTopX + wheelR * at(0.35, 0.45))} ${px(barTopY + wheelR * at(0.1, 0.2))}" fill="none" stroke="${ink}" stroke-width="${px(wheelR * 0.09)}" stroke-linecap="round"/>`);
   }
   if (flags["cargo box"]) svg.push(`<rect x="${px(frontX - wheelR * 0.75)}" y="${px(axleY - wheelR * 2.3)}" width="${px(wheelR * 1.5)}" height="${px(wheelR * 1.1)}" fill="#b08968" stroke="#6b4f35" stroke-width="${px(wheelR * 0.06)}"/>`);
   if (flags["rear rack"]) svg.push(`<rect x="${px(rearX - wheelR * 0.65)}" y="${px(axleY - wheelR * 1.25)}" width="${px(wheelR * 1.3)}" height="${px(wheelR * 0.12)}" fill="${ink}"/>`);
@@ -149,8 +169,12 @@ export function promptOnlySvg(prompt, canvasW = 1000, canvasH = 600) {
   // pedals, and tail feathers when named.
   svg.push(`<ellipse cx="${px(bodyX)}" cy="${px(bodyY)}" rx="${px(bodyRx)}" ry="${px(bodyRy)}" fill="${plumage}" stroke="#44464e" stroke-width="${px(wheelR * 0.05)}"/>`);
   svg.push(`<ellipse cx="${px(bodyX - bodyRx * 0.1)}" cy="${px(bodyY + bodyRy * 0.15)}" rx="${px(bodyRx * 0.55)}" ry="${px(bodyRy * 0.45)}" fill="${wingC}"/>`);
-  if (flags["tail feathers"]) svg.push(`<path d="M${px(bodyX - bodyRx + W * 0.006)} ${px(bodyY + bodyRy * 0.3)}q${px(-W * 0.06)} ${px(H * 0.015)} ${px(-W * 0.11)} ${px(H * 0.07)}q${px(W * 0.06)} ${px(-H * 0.01)} ${px(W * 0.11)} ${px(-H * 0.035)}Z" fill="${wingC}" stroke="#44464e" stroke-width="${px(wheelR * 0.04)}"/>`);
-  if (longNeck) svg.push(`<path d="M${px(bodyX + bodyRx * 0.4)} ${px(bodyY - bodyRy * 0.7)}Q${px(headX - headR)} ${px((bodyY + headY) / 2)} ${px(headX - headR * 0.4)} ${px(headY + headR * 0.9)}" fill="none" stroke="${plumage}" stroke-width="${px(headR * 0.8)}" stroke-linecap="round"/>`);
+  // "A fan of feathers taller than half a wheel radius" — draw a plain
+  // triangle fan about 0.7R tall trailing off the body's rear.
+  if (flags["tail feathers"]) svg.push(`<path d="M${px(bodyX - bodyRx + W * 0.006)} ${px(bodyY + bodyRy * 0.1)}L${px(bodyX - bodyRx - wheelR * at(0.8, 1.0))} ${px(bodyY + bodyRy * 0.15 + wheelR * at(0.6, 0.75))}L${px(bodyX - bodyRx - wheelR * 0.15)} ${px(bodyY + bodyRy * 0.35)}Z" fill="${wingC}" stroke="#44464e" stroke-width="${px(wheelR * 0.04)}"/>`);
+  // A plain straight neck bridging chest and head: a curved stroke over the
+  // front wheel could read as swept or drop bars, so keep it straight.
+  if (longNeck) svg.push(`<path d="M${px(bodyX + bodyRx * 0.2)} ${px(bodyY + bodyRy * 0.2)}L${px(headX - headR * 0.4)} ${px(headY + headR * 0.9)}" fill="none" stroke="${plumage}" stroke-width="${px(headR * 0.8)}" stroke-linecap="round"/>`);
   svg.push(`<circle cx="${px(headX)}" cy="${px(headY)}" r="${px(headR)}" fill="${plumage}" stroke="#44464e" stroke-width="${px(wheelR * 0.05)}"/>`);
   svg.push(`<circle cx="${px(headX + headR * 0.3)}" cy="${px(headY - headR * 0.3)}" r="${px(headR * 0.2)}" fill="${ink}"/>`);
 
@@ -171,10 +195,15 @@ export function promptOnlySvg(prompt, canvasW = 1000, canvasH = 600) {
   };
   svg.push(beakShapes[beak]);
 
-  const legTopY = bodyY + bodyRy * 0.7;
-  const legEndY = flags["long legs"] ? axleY + wheelR * 0.3 : crankY + wheelR * 0.1;
-  const legW = flags["long legs"] ? wheelR * 0.06 : wheelR * 0.1;
-  svg.push(`<path d="M${px(bodyX - bodyRx * 0.4)} ${px(legTopY)}L${px(crankX - wheelR * 0.2)} ${px(legEndY)}M${px(bodyX + bodyRx * 0.3)} ${px(legTopY)}L${px(crankX + wheelR * 0.15)} ${px(legEndY)}" fill="none" stroke="${legC}" stroke-width="${px(legW)}" stroke-linecap="round"/>`);
+  // Legs run from under the body to the pedals near axle height. The prompt
+  // does not say where the foot lands, so the bottom jitters anywhere in
+  // [-0.2R, +0.3R] of the axle line; a long-legged wader dangles at least
+  // half a wheel radius below it, as the prompt states.
+  const legTopY = bodyY + bodyRy * at(0.55, 0.8);
+  const legEndY = flags["long legs"] ? axleY + wheelR * at(0.6, 0.75) : axleY + wheelR * at(-0.2, 0.3);
+  const legW = flags["long legs"] ? wheelR * at(0.05, 0.08) : wheelR * at(0.08, 0.13);
+  const legFootX = (side) => px(Math.min(crankX + side * wheelR * at(0.05, 0.25), bodyX + bodyRx + wheelR * 0.5));
+  svg.push(`<path d="M${px(bodyX - bodyRx * 0.4)} ${px(legTopY)}L${legFootX(-1)} ${px(legEndY)}M${px(bodyX + bodyRx * 0.3)} ${px(legTopY)}L${legFootX(1)} ${px(legEndY)}" fill="none" stroke="${legC}" stroke-width="${px(legW)}" stroke-linecap="round"/>`);
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img">\n${svg.join("\n")}\n</svg>`;
 }

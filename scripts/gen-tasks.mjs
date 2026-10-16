@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { GATE_PARTS, PART_PHRASES } from "./parts.mjs";
 
 const argv = process.argv.slice(2);
 function option(name, fallback) {
@@ -82,12 +83,6 @@ const VEHICLES = {
     "fat bike": { bars: "handlebars", tires: "fat tires", extras: [], wheelbase: 345, wheelR: 72, tire: 22 },
   },
 };
-
-// Parts every task shares. Everything else in requiredParts is task-specific and
-// separates this drawing from the other tasks in the split.
-const GATE_PARTS = ["two wheels", "bicycle frame", "handlebars", "pedals", "bird body", "bird head", "beak", "legs reaching the pedals"];
-// How each check reads in prompt text when the check name itself is not used.
-const PART_PHRASES = { "bird body": "body", "bird head": "head", "beak": "beak" };
 
 const article = (word) => (/^[aeiou]/i.test(word) ? "an" : "a");
 

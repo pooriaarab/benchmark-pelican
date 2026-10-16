@@ -8,6 +8,7 @@ authors:
 version: "0.2.0"
 date-released: 2026-10-16
 license: MIT
+doi: 10.5281/zenodo.23422362
 repository-code: https://github.com/pooriaarab/benchmark-pelican
 url: "https://aibenchmarkindex.com/benchmarks/benchmark-pelican"
 abstract: "Deterministic AI benchmark for SVG spatial reasoning: can a model draw a pelican riding a bicycle?"

@@ -11,7 +11,7 @@ async function loadTasks(tasksPath?: string): Promise<Task[]> {
 const definition: Omit<BenchmarkDefinition, "tasks" | "loadTasks"> = {
   id: "benchmark-pelican", name: "Pelican Bicycle SVG", tagline: "Can a model draw a bird riding a bicycle in safe, plausible SVG?", tags: ["viral", "silly"], category: "multimodal",
   // benchmark-core 0.1 types saturation as numeric; the family index schema also permits "unknown".
-  whatItMeasures: "Structural SVG drawing: safe markup, bicycle geometry, bird anatomy, spatial arrangement, and useful canvas coverage.", version: "0.1.0", status: "alpha", saturation: "unknown" as never,
+  whatItMeasures: "Structural SVG drawing: safe markup, bicycle geometry, bird anatomy, spatial arrangement, and useful canvas coverage.", version: "0.2.0", status: "alpha", saturation: "unknown" as never,
   grade: (task: Task, submission: Trace) => gradeSvg(submission.answer, task),
   provenance: [
     {

@@ -2,11 +2,28 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.pooriaarab/benchmark-pelican",
   "description": "Score bird-on-bicycle SVG structure with a deterministic benchmark.",
-  "version": "0.1.0",
-  "repository": { "url": "https://github.com/pooriaarab/benchmark-pelican", "source": "github" },
-  "packages": [{
-    "registryType": "npm", "registryBaseUrl": "https://registry.npmjs.org", "identifier": "benchmark-pelican", "version": "0.1.0",
-    "transport": { "type": "stdio" }, "runtimeHint": "npx",
-    "packageArguments": [{ "type": "positional", "valueHint": "subcommand", "value": "mcp" }]
-  }]
+  "version": "0.2.0",
+  "repository": {
+    "url": "https://github.com/pooriaarab/benchmark-pelican",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "benchmark-pelican",
+      "version": "0.2.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "runtimeHint": "npx",
+      "packageArguments": [
+        {
+          "type": "positional",
+          "valueHint": "subcommand",
+          "value": "mcp"
+        }
+      ]
+    }
+  ]
 }

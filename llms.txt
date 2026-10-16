@@ -8,15 +8,15 @@ Directory: https://private-repo-337e.com/benchmarks/benchmark-pelican
 
 ## Exports
 
-The root exports `benchmark`, `run`, and `score`. `benchmark-pelican/api` exports the fetch-style `handler`. `benchmark-pelican/mcp` exports MCP builders.
+The root exports `benchmark`, `createBenchmark`, `run`, `score`, and `attachBreakdown`. `benchmark-pelican/api` exports the fetch-style `handler`. `benchmark-pelican/mcp` exports MCP builders.
 
 ## Commands
 
-The CLI supports list, show, run, score, card, provenance, index-entry, serve, and mcp. Use the mock provider for offline verification.
+The CLI supports list, show, run, score, card, provenance, index-entry, serve, and mcp. Use the mock provider for offline verification. `--tasks <path>` loads a generated split file.
 
 ## Data and grading
 
-Thirty single-answer tasks come from one canonical prompt and a seeded animal and bicycle grid. The grader rejects unsafe SVG, then scores geometry and coverage. It does not use a model judge.
+Thirty single-answer tasks come from one canonical prompt and a seeded animal and bicycle grid. The grader extracts the single SVG block, rejects unsafe markup, then scores the task's required parts as a weighted sum with bicycle-or-bird evidence caps. Reports carry a per-check `checkSummary`. It does not use a model judge.
 
 Public seed: 20261015. Hidden outputs must stay outside the package. Detailed rules ship in `docs/grading.md`.
 

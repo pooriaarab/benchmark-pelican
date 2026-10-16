@@ -100,7 +100,9 @@ for (const answer of unsafeAnswers) assert.equal((await benchmark.score(tasks[0]
 
 // Hidden split: disjoint ids and prompts, never inside data/, and public
 // reference answers must score below 1 on hidden tasks.
-await execFile(process.execPath, ["scripts/gen-tasks.mjs", "--split", "hidden", "--seed", "424242", "--output", "artifacts/tasks.hidden.jsonl"]);
+await assert.rejects(execFile(process.execPath, ["scripts/gen-tasks.mjs", "--split", "hidden", "--output", "artifacts/none.jsonl"], { env: { ...process.env, BPEL_HIDDEN_SEED: "" } }), /private seed|integer/, "hidden split must require a private seed");
+const hiddenGen = await execFile(process.execPath, ["scripts/gen-tasks.mjs", "--split", "hidden", "--seed", "424242", "--output", "artifacts/tasks.hidden.jsonl"]);
+assert.ok(!hiddenGen.stdout.includes("424242"), "hidden generation must not log the private seed");
 const { createBenchmark } = await import("../dist/index.js");
 const hiddenBenchmark = createBenchmark("artifacts/tasks.hidden.jsonl");
 const hiddenTasks = await hiddenBenchmark.listTasks();

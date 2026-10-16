@@ -38,25 +38,84 @@ await execFile(process.execPath, ["scripts/gallery.mjs", "artifacts/mock-report.
 assert.match(await readFile("artifacts/gallery.html", "utf8"), /saved submissions/);
 
 const tasks = await benchmark.listTasks();
+const bicycleOnly = '<svg viewBox="0 0 640 420"><rect width="640" height="420" fill="#eef"/><circle cx="170" cy="330" r="60" fill="none" stroke="#222" stroke-width="10"/><circle cx="470" cy="330" r="60" fill="none" stroke="#222" stroke-width="10"/><path d="M170 330L300 300L260 240M300 300L420 240L470 330M420 240L450 210" fill="none" stroke="#335" stroke-width="10"/><circle cx="300" cy="300" r="10" fill="#333"/></svg>';
+const abstractShapes = `<svg viewBox="0 0 640 420">${Array.from({ length: 18 }, (_, i) => `<rect x="${(i * 37) % 560}" y="${(i * 53) % 380}" width="${20 + (i % 4) * 15}" height="${15 + (i % 3) * 20}" fill="${i % 2 ? "#7aa" : "#a7a"}"/><line x1="${i * 30}" y1="${i * 20}" x2="${i * 30 + 50}" y2="${i * 20 + 40}" stroke="#456" stroke-width="3"/>`).join("")}</svg>`;
 const weakAnswers = [
   { name: "empty", submission: { answer: "" } },
   { name: "random", submission: { answer: "clouds have seven pockets" } },
   { name: "always-yes", submission: { answer: "yes" } },
+  { name: "always-refuse", submission: { answer: "I cannot help with that request." } },
   { name: "same-tool-call", submission: { answer: "", toolLog: [{ id: "same", name: "finish_task", args: {}, result: { finished: true } }] } },
+  { name: "constant-svg", submission: { answer: bicycleOnly } },
+  { name: "abstract-shapes", submission: { answer: abstractShapes } },
 ];
+const adversarialScores = {};
 for (const strategy of weakAnswers) {
   const scores = await Promise.all(tasks.map((task) => benchmark.score(task, strategy.submission)));
-  assert.ok(scores.every(({ score }) => score <= 0.2), `${strategy.name} must score low`);
+  const values = scores.map(({ score }) => score);
+  adversarialScores[strategy.name] = Math.round(values.reduce((a, b) => a + b, 0) / values.length * 1000) / 1000;
+  assert.ok(values.every((score) => score <= 0.2), `${strategy.name} must score low on every task`);
 }
 const referenceScores = await Promise.all(tasks.map((task) => benchmark.score(task, { answer: String(task.expected) })));
 assert.ok(referenceScores.every(({ score }) => score >= 0.85), "every generated reference must score high");
+const referenceMean = referenceScores.reduce((a, { score }) => a + score, 0) / referenceScores.length;
+for (const strategy of weakAnswers) assert.ok(adversarialScores[strategy.name] < referenceMean - 0.5, `${strategy.name} must be well below the reference policy`);
+
+// A memorised drawing must not ace every task: replay the canonical pelican SVG
+// and require a clear gap between matching and non-matching tasks.
+const memorised = await Promise.all(tasks.map((task) => benchmark.score(task, { answer: String(tasks[0].expected) })));
+assert.ok(memorised[0].score === 1, "canonical reference must ace its own task");
+const nonPelican = memorised.filter((_score, index) => tasks[index].metadata?.animal !== "pelican");
+assert.ok(nonPelican.every(({ score }) => score < 1), "a memorised pelican must not ace other animals");
+assert.ok(nonPelican.reduce((a, { score }) => a + score, 0) / nonPelican.length < referenceMean - 0.1, "memorised answer must sit below the reference policy");
+
+// Honest formatting must score high: one fence, prose wrap, prolog, comments,
+// text-bearing elements, and the five XML entities are all accepted.
+const canonical = String(tasks[0].expected);
+const honestAnswers = [
+  ["fenced", `\`\`\`svg\n${canonical}\n\`\`\``],
+  ["prose", `Here is the SVG you asked for:\n${canonical}\nHope that helps.`],
+  ["prolog", `<?xml version="1.0" encoding="UTF-8"?>\n${canonical}`],
+  ["comment", `<!-- drawing -->\n${canonical.replace("</svg>", "<!-- done --></svg>")}`],
+  ["title-element", canonical.replace("<rect", "<title>A pelican riding a bicycle</title><rect")],
+  ["text-element", canonical.replace("</svg>", '<text x="20" y="34" font-size="20">a pelican</text></svg>')],
+  ["entity", canonical.replace('aria-label="pelican riding a bicycle"', 'aria-label="pelican &amp; bicycle"')],
+];
+const honestScores = {};
+for (const [name, answer] of honestAnswers) {
+  const { score } = await benchmark.score(tasks[0], { answer });
+  honestScores[name] = score;
+  assert.ok(score >= 0.85, `honest ${name} answer must score high, got ${score}`);
+}
+
 const unsafeAnswers = [
   '<svg viewBox="0 0 100 100"><a href=javascript:alert(1)></a></svg>',
   '<svg viewBox="0 0 100 100"><style>@import "https://bad.invalid/x"</style></svg>',
   '<svg viewBox="0 0 100 100"><use href="#wheels"/></svg>',
   '<svg viewBox="0 0 100 100"><animate attributeName="href" to="javascript:alert(1)"/></svg>',
+  '<svg viewBox="0 0 100 100"><image href="https://bad.invalid/x.png"/></svg>',
+  '<svg viewBox="0 0 100 100"><foreignObject><p>html</p></foreignObject></svg>',
 ];
 for (const answer of unsafeAnswers) assert.equal((await benchmark.score(tasks[0], { answer })).score, 0, "unsafe SVG must score zero");
+
+// Hidden split: disjoint ids and prompts, never inside data/, and public
+// reference answers must score below 1 on hidden tasks.
+await execFile(process.execPath, ["scripts/gen-tasks.mjs", "--split", "hidden", "--seed", "424242", "--output", "artifacts/tasks.hidden.jsonl"]);
+const { createBenchmark } = await import("../dist/index.js");
+const hiddenBenchmark = createBenchmark("artifacts/tasks.hidden.jsonl");
+const hiddenTasks = await hiddenBenchmark.listTasks();
+assert.equal(hiddenTasks.length, 30);
+assert.ok(hiddenTasks.every((task) => task.id.startsWith("hidden-")), "hidden tasks need the hidden- id prefix");
+const publicPrompts = new Set(tasks.map((task) => task.prompt));
+assert.ok(hiddenTasks.every((task) => !publicPrompts.has(task.prompt)), "hidden prompts must differ from public prompts");
+const hiddenCross = await Promise.all(hiddenTasks.map((task) => hiddenBenchmark.score(task, { answer: canonical })));
+assert.ok(hiddenCross.every(({ score }) => score < 1), "a public reference must score below 1 on hidden tasks");
+const hiddenCli = JSON.parse((await execFile(process.execPath, ["dist/cli.js", "run", "--model", "offline", "--provider", "mock", "--tasks", "artifacts/tasks.hidden.jsonl", "--json"], { maxBuffer: 1_000_000 })).stdout);
+assert.equal(hiddenCli.rows.length, 30);
+assert.ok(Array.isArray(hiddenCli.checkSummary) && hiddenCli.checkSummary.length > 0, "run report must expose the check breakdown");
+assert.ok(hiddenCli.rows.some((row) => Array.isArray(row.details) && row.details.length > 0), "run rows must expose per-check details");
+const packed = JSON.parse((await execFile("npm", ["pack", "--dry-run", "--json"])).stdout);
+assert.ok(!packed[0].files.some((file) => file.path.startsWith("hidden/") || file.path.includes("tasks.hidden")), "hidden split must not ship in the npm package");
 
 const probe = createNetServer();
 await new Promise((resolve) => probe.listen(0, "127.0.0.1", resolve));
@@ -98,7 +157,10 @@ try {
 
 const artifact = {
   task_count: report.rows.length, scores: report.rows.map((row) => row.score),
-  adversarial_scores: Object.fromEntries(weakAnswers.map(({ name }) => [name, 0])),
+  adversarial_scores: adversarialScores,
+  honest_answer_scores: honestScores,
+  memorised_nonmatching_mean: Math.round(nonPelican.reduce((a, { score }) => a + score, 0) / nonPelican.length * 1000) / 1000,
+  hidden_split: { tasks: hiddenTasks.length, public_reference_max: Math.max(...hiddenCross.map(({ score }) => score)) },
   reference_score_range: [Math.min(...referenceScores.map(({ score }) => score)), Math.max(...referenceScores.map(({ score }) => score))],
   route_status_codes: routes, tool_names: toolNames,
 };

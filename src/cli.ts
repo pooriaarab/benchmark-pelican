@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import { readFile, writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { bootstrapCI, createCli, mockAdapter, openaiCompatAdapter, openrouterAdapter, renderMarkdown, run as coreRun, type Benchmark, type ModelAdapter, type RunReport, type Task } from "benchmark-core";
 import { attachBreakdown, breakdownText, type PelicanReport } from "./breakdown.js";
 import { benchmark, createBenchmark } from "./benchmark.js";
 import { renderPelicanCard } from "./card.js";
+import { createMcpServer } from "./mcp.js";
 
 class UsageError extends Error {}
 
@@ -85,6 +87,7 @@ if (tasksIndex !== -1 && !tasksPath) {
       } else console.log(json ? JSON.stringify({ svg }) : svg);
     } else if (args[0] === "run") process.exitCode = await runCommand(clean, json, bench);
     else if (args[0] === "score") process.exitCode = await scoreCommand(clean, json, bench);
+    else if (args[0] === "mcp") await createMcpServer(bench).connect(new StdioServerTransport());
     else process.exitCode = await createCli(bench, { bin: "benchmark-pelican" }).main(args);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

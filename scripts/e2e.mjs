@@ -194,21 +194,32 @@ try {
   assert.equal((await get("/v1/index-entry")).value.task_count, 30);
 } finally { if (server.exitCode === null) { server.kill("SIGTERM"); await once(server, "exit"); } }
 
-const transport = new StdioClientTransport({ command: process.execPath, args: ["dist/cli.js", "mcp"], cwd: process.cwd(), stderr: "pipe" });
+// The mcp command must serve this package's enriched server, not the core one:
+// drive run_benchmark over the real bin with a stubbed fetch and require the
+// run report's checkSummary.
+const transport = new StdioClientTransport({
+  command: process.execPath, args: ["dist/cli.js", "mcp"], cwd: process.cwd(), stderr: "pipe",
+  env: { OPENROUTER_API_KEY: "e2e-stub", NODE_OPTIONS: "--import ./scripts/e2e-fetch-stub.mjs" },
+});
 const client = new Client({ name: "benchmark-pelican-e2e", version: "0.2.0" });
-await client.connect(transport); let toolNames;
+await client.connect(transport); let toolNames; let mcpRunReport;
 try {
   const available = await client.listTools(); toolNames = available.tools.map((tool) => tool.name).sort();
   assert.deepEqual(toolNames, ["get_provenance", "get_task", "list_tasks", "run_benchmark", "score_answer"]);
   const calls = [
     ["list_tasks", {}], ["get_task", { taskId: "public-pelican-bicycle" }],
     ["score_answer", { taskId: "public-pelican-bicycle", submission: report.rows[0].submission }],
-    ["get_provenance", {}], ["run_benchmark", { model: "offline" }],
+    ["get_provenance", {}],
   ];
   for (const [name, args] of calls) {
     const result = await client.callTool({ name, arguments: args });
-    if (name === "run_benchmark") assert.equal(result.isError, true); else assert.notEqual(result.isError, true);
+    assert.notEqual(result.isError, true);
   }
+  const ran = await client.callTool({ name: "run_benchmark", arguments: { model: "e2e-stub" } });
+  assert.notEqual(ran.isError, true);
+  mcpRunReport = JSON.parse(ran.content[0].text);
+  assert.ok(Array.isArray(mcpRunReport.checkSummary) && mcpRunReport.checkSummary.length > 0, "MCP run_benchmark must return checkSummary");
+  assert.ok(mcpRunReport.rows.length === 30 && mcpRunReport.rows.some((row) => row.details?.length > 0), "MCP report rows must carry per-check details");
 } finally { await client.close(); }
 
 const artifact = {
@@ -219,6 +230,7 @@ const artifact = {
   hidden_split: { tasks: hiddenTasks.length, public_reference_max: Math.max(...hiddenCross.map(({ score }) => score)), memorised_reference: hiddenMemorisedReference },
   reference_score_range: [Math.min(...referenceScores.map(({ score }) => score)), Math.max(...referenceScores.map(({ score }) => score))],
   route_status_codes: routes, tool_names: toolNames,
+  mcp_check_summary_entries: mcpRunReport.checkSummary.length,
 };
 await writeFile("artifacts/e2e-report.json", `${JSON.stringify(artifact, null, 2)}\n`);
 assert.equal(await readFile("data/PROVENANCE.md", "utf8"), provenanceMarkdown(benchmark));

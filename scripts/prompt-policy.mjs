@@ -169,8 +169,8 @@ export function promptOnlySvg(prompt, canvasW = 1000, canvasH = 600) {
   // pedals, and tail feathers when named.
   svg.push(`<ellipse cx="${px(bodyX)}" cy="${px(bodyY)}" rx="${px(bodyRx)}" ry="${px(bodyRy)}" fill="${plumage}" stroke="#44464e" stroke-width="${px(wheelR * 0.05)}"/>`);
   svg.push(`<ellipse cx="${px(bodyX - bodyRx * 0.1)}" cy="${px(bodyY + bodyRy * 0.15)}" rx="${px(bodyRx * 0.55)}" ry="${px(bodyRy * 0.45)}" fill="${wingC}"/>`);
-  // "A fan of feathers taller than half a wheel radius" — draw a plain
-  // triangle fan about 0.7R tall trailing off the body's rear.
+  // "A fan of feathers taller than 0.4 times the wheel radius" — draw a
+  // plain triangle fan about 0.7R tall trailing off the body's rear.
   if (flags["tail feathers"]) svg.push(`<path d="M${px(bodyX - bodyRx + W * 0.006)} ${px(bodyY + bodyRy * 0.1)}L${px(bodyX - bodyRx - wheelR * at(0.8, 1.0))} ${px(bodyY + bodyRy * 0.15 + wheelR * at(0.6, 0.75))}L${px(bodyX - bodyRx - wheelR * 0.15)} ${px(bodyY + bodyRy * 0.35)}Z" fill="${wingC}" stroke="#44464e" stroke-width="${px(wheelR * 0.04)}"/>`);
   // A plain straight neck bridging chest and head: a curved stroke over the
   // front wheel could read as swept or drop bars, so keep it straight.

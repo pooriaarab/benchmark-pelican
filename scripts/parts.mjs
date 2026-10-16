@@ -22,7 +22,7 @@ export const PART_HINTS = {
   "upright body": "a body taller than it is wide",
   "level body": "a body wider than it is tall",
   "long legs": "thin legs dangling at least half a wheel radius below the wheel axles",
-  "tail feathers": "a fan of feathers trailing behind the body, taller than half a wheel radius",
+  "tail feathers": "a fan of feathers trailing behind the body, taller than 0.4 times the wheel radius",
   "drop handlebars": "just above the front wheel, no higher than about half a wheelbase above the axles, curling downward in a curl taller than it is wide",
   "swept handlebars": "just above the front wheel, no higher than about half a wheelbase above the axles, curving back toward the rider",
   "handlebars": "just above the front wheel, no higher than about half a wheelbase above the axles",

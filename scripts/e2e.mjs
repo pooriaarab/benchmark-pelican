@@ -156,7 +156,8 @@ for (const strategy of weakAnswers) assert.ok(adversarialScores[strategy.name] <
 // the prompts leave open, seeded by the prompt text: leg bottoms land anywhere
 // in [-0.2R, +0.3R] of the axle line, and body and handlebar proportions
 // wander. Measured 2026-10-16: mean 1.000 and 30/30 at 0.8 or above on the
-// public split and on hidden seeds 7, 99 and 4242, at 1000x600 and 640x480.
+// public split and on held-out test seeds 7, 99 and 4242, at 1000x600
+// and 640x480.
 // The bound below is that measurement minus a margin of five tasks.
 const PROMPT_ONLY_MIN = 25;
 const promptOnlyCanvases = [[1000, 600], [640, 480]];
@@ -280,7 +281,7 @@ assert.ok(hiddenCross.every(({ score }) => score < 1), "a public reference must 
 const hiddenReferenceScores = await Promise.all(hiddenTasks.map((task) => hiddenBenchmark.score(task, { answer: String(task.expected) })));
 assert.ok(hiddenReferenceScores.every(({ score }) => score === 1), "every hidden reference must score exactly 1");
 // Every reference drawing must score exactly 1 on its own task across 30
-// hidden seeds — not only the seeds used elsewhere in this file — so a
+// held-out seeds — not only the seeds used elsewhere in this file — so a
 // seed-specific false positive (a saddle read as a tail, a leg read as a
 // wader's) cannot hide behind one lucky split.
 const hiddenSeeds = [7, 99, 2026, 4242, 424242, 1, 13, 42, 77, 123, 314, 555, 777, 1000, 1337, 2048, 3000, 5000, 9001, 12345, 31337, 65535, 99999, 111111, 222222, 314159, 555555, 777777, 888888, 999983];
@@ -296,8 +297,8 @@ for (const [seed, { bench, tasks: list }] of hiddenSuites) {
   const scores = await Promise.all(list.map((task) => bench.score(task, { answer: String(task.expected) })));
   assert.ok(scores.every(({ score }) => score === 1), `every hidden reference must score exactly 1 (seed ${seed})`);
 }
-// The prompt-only measurement runs per split: public, and hidden seeds 7, 99
-// and 4242. Bounds are the measured counts minus the same margin.
+// The prompt-only measurement runs per split: public, and held-out seeds 7,
+// 99 and 4242. Bounds are the measured counts minus the same margin.
 for (const seed of [7, 99, 4242]) {
   const { bench, tasks: list } = hiddenSuites.get(seed);
   const result = await promptOnlyRun(bench, list);

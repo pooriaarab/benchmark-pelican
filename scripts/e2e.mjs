@@ -155,10 +155,9 @@ for (const strategy of weakAnswers) assert.ok(adversarialScores[strategy.name] <
 // The independent literal-number policy (scripts/literal-policy.mjs) draws
 // exactly the numbers each prompt states — a tail 0.42-0.5R tall where the
 // prompt says "taller than 0.4 times the wheel radius", pedals on the axle
-// line, tire strokes just over their stated minimums — with its own layout
-// and seeded jitter; its measured range is the evidence cited in the docs.
-// The builder's tuned prompt-only policy (scripts/prompt-policy.mjs) is kept
-// only as a smoke test that a careful prompt-reader can pass.
+// line — with its own layout and seeded jitter; its range is what the docs
+// cite. The builder's tuned prompt-only policy (scripts/prompt-policy.mjs) is
+// kept only as a smoke test that a careful prompt-reader can pass.
 // Measured 2026-10-16: the literal policy scores a mean of 1.000 with 30/30
 // at 0.8 or above on the public split and on held-out test seeds 7, 99 and
 // 4242; the bound below is that measured minimum minus a margin of five.
@@ -330,20 +329,16 @@ for (const seed of [7, 99, 4242]) {
 // 99 and 4242. The probe swaps each reference's own tail fan for a plain
 // filled triangle of the measured height.
 const TAIL_PATH = /<path d="M([\d.]+) ([\d.]+)q-46 4 -64 44q48 -4 70 -28"[^>]*\/>/;
-const tailSweep = { heights: [0.42, 0.45, 0.48, 0.52, 0.7], tasks: 0, misses: [] };
+const tailSweep = { heights: [0.42, 0.45, 0.48, 0.52, 0.7], tasks: 0 };
 for (const [label, bench, list] of [["public", benchmark, tasks], ...[7, 99, 4242].map((seed) => [`hidden_seed_${seed}`, hiddenSuites.get(seed).bench, hiddenSuites.get(seed).tasks])]) {
   for (const task of list.filter((item) => (item.metadata?.requiredParts ?? []).includes("tail feathers"))) {
-    const expected = String(task.expected);
-    const tail = expected.match(TAIL_PATH);
-    assert.ok(tail, `${task.id} reference must carry a tail fan`);
-    const radius = Number(expected.match(/<circle cx="[\d.]+" cy="[\d.]+" r="([\d.]+)" fill="none"/)[1]);
-    const x = Number(tail[1]), y = Number(tail[2]);
+    const expected = String(task.expected), tail = expected.match(TAIL_PATH);
+    const radius = Number(expected.match(/<circle cx="[\d.]+" cy="[\d.]+" r="([\d.]+)" fill="none"/)?.[1]);
+    assert.ok(tail && radius, `${task.id} reference must carry a tail fan and wheels`);
     tailSweep.tasks += 1;
     for (const k of tailSweep.heights) {
-      const fan = `<path d="M${x} ${y}L${Math.round((x - radius * 0.5) * 10) / 10} ${Math.round((y + radius * k) * 10) / 10}L${x} ${Math.round((y + radius * k * 0.55) * 10) / 10}Z" fill="#8ecae6"/>`;
-      const { score } = await bench.score(task, { answer: expected.replace(TAIL_PATH, fan) });
-      if (score !== 1) tailSweep.misses.push(`${label}:${task.id}@${k}R=${score}`);
-      assert.equal(score, 1, `${task.id} must accept a ${k}R tail fan, got ${score}`);
+      const fan = `<path d="M${tail[1]} ${tail[2]}L${tail[1] - radius * 0.5} ${Number(tail[2]) + radius * k}L${tail[1]} ${Number(tail[2]) + radius * k * 0.55}Z" fill="#8ecae6"/>`;
+      assert.equal((await bench.score(task, { answer: expected.replace(TAIL_PATH, fan) })).score, 1, `${label}:${task.id} must accept a ${k}R tail fan`);
     }
   }
 }

@@ -16,7 +16,7 @@ The grader reads SVG text without a browser, renderer, network call, or model ju
 10. One memorised drawing can answer every task unless scoring reads each task's required parts.
 11. Relative path commands can produce wrong bounds when coordinates are read as absolute pairs.
 
-The E2E gate runs empty, random, always-yes, always-refuse, same-tool-call, constant-SVG, and abstract-shapes strategies over every task; each must stay at or below 0.2. It also submits every generated reference drawing, which must score at least 0.85, honest formatting variants (fence, prose, prolog, comments, text elements, entities), which must score high, and a memorised pelican on non-pelican tasks, which must score below 1.
+The E2E gate runs empty, random, always-yes, always-refuse, same-tool-call, and abstract-shapes strategies over every task; each must stay at or below 0.2. Every generated reference drawing must score exactly 1.0 on its own task, on both splits. The real memorised-reference attack replays every task's reference against every other task: no pair may exceed 0.4, the mismatched mean stays at or below 0.3, and the best single memorised reference averages at most 0.4 across the suite. Honest formatting variants (fence, prose, prolog, comments, text elements, entities) must score high, and every checked part must be readable in the prompt text.
 
 ## Answer extraction
 
@@ -37,7 +37,7 @@ taskFit = 0.4 ^ (missed required task-specific parts + unrequested task-specific
 
 The shared gate holds the checks every task asks for: safe well-formed markup, two wheels, a bicycle frame, handlebars, pedals, a bird body, a bird head, a beak, legs reaching the pedals, and canvas coverage. The task fit holds the parts that change per task: the named animal's beak style, neck, body posture, legs and extras, and the named vehicle's handlebar style, wheel size, wheelbase class, tire class, and extras. A memorised drawing of the wrong bird fails the specific checks instead of coasting on the shared ones, and a drawing that adds parts the task never asked for is penalised the same way.
 
-Each task's `metadata.requiredParts` lists the parts the prompt states; the generator asserts every checked part appears in the prompt text, so a model can draw a full score from the prompt alone. The E2E scores the canonical pelican drawing against every task and requires it to sit far below the reference policy on non-pelican tasks.
+Each task's `metadata.requiredParts` lists the parts the prompt states; the generator asserts every checked part appears in the prompt text, so a model can draw a full score from the prompt alone. The E2E replays every task's reference drawing on every other task in both splits, so the separation is measured rather than assumed.
 
 ### Shared gate checks
 

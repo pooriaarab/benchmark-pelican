@@ -8,6 +8,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { provenanceMarkdown } from "benchmark-core";
 import { benchmark } from "../dist/index.js";
+import { GATE_PARTS, PART_PHRASES } from "./parts.mjs";
 const execFile = promisify(execFileCallback);
 
 await execFile("npm", ["run", "build"]);
@@ -48,7 +49,6 @@ await execFile(process.execPath, ["scripts/gallery.mjs", "artifacts/mock-report.
 assert.match(await readFile("artifacts/gallery.html", "utf8"), /saved submissions/);
 
 const tasks = await benchmark.listTasks();
-const bicycleOnly = '<svg viewBox="0 0 640 420"><rect width="640" height="420" fill="#eef"/><circle cx="170" cy="330" r="60" fill="none" stroke="#222" stroke-width="10"/><circle cx="470" cy="330" r="60" fill="none" stroke="#222" stroke-width="10"/><path d="M170 330L300 300L260 240M300 300L420 240L470 330M420 240L450 210" fill="none" stroke="#335" stroke-width="10"/><circle cx="300" cy="300" r="10" fill="#333"/></svg>';
 const abstractShapes = `<svg viewBox="0 0 640 420">${Array.from({ length: 18 }, (_, i) => `<rect x="${(i * 37) % 560}" y="${(i * 53) % 380}" width="${20 + (i % 4) * 15}" height="${15 + (i % 3) * 20}" fill="${i % 2 ? "#7aa" : "#a7a"}"/><line x1="${i * 30}" y1="${i * 20}" x2="${i * 30 + 50}" y2="${i * 20 + 40}" stroke="#456" stroke-width="3"/>`).join("")}</svg>`;
 const weakAnswers = [
   { name: "empty", submission: { answer: "" } },
@@ -56,7 +56,6 @@ const weakAnswers = [
   { name: "always-yes", submission: { answer: "yes" } },
   { name: "always-refuse", submission: { answer: "I cannot help with that request." } },
   { name: "same-tool-call", submission: { answer: "", toolLog: [{ id: "same", name: "finish_task", args: {}, result: { finished: true } }] } },
-  { name: "constant-svg", submission: { answer: bicycleOnly } },
   { name: "abstract-shapes", submission: { answer: abstractShapes } },
 ];
 const adversarialScores = {};
@@ -67,17 +66,52 @@ for (const strategy of weakAnswers) {
   assert.ok(values.every((score) => score <= 0.2), `${strategy.name} must score low on every task`);
 }
 const referenceScores = await Promise.all(tasks.map((task) => benchmark.score(task, { answer: String(task.expected) })));
-assert.ok(referenceScores.every(({ score }) => score >= 0.85), "every generated reference must score high");
+assert.ok(referenceScores.every(({ score }) => score === 1), "every generated reference must score exactly 1");
 const referenceMean = referenceScores.reduce((a, { score }) => a + score, 0) / referenceScores.length;
 for (const strategy of weakAnswers) assert.ok(adversarialScores[strategy.name] < referenceMean - 0.5, `${strategy.name} must be well below the reference policy`);
 
-// A memorised drawing must not ace every task: replay the canonical pelican SVG
-// and require a clear gap between matching and non-matching tasks.
-const memorised = await Promise.all(tasks.map((task) => benchmark.score(task, { answer: String(tasks[0].expected) })));
-assert.ok(memorised[0].score === 1, "canonical reference must ace its own task");
-const nonPelican = memorised.filter((_score, index) => tasks[index].metadata?.animal !== "pelican");
-assert.ok(nonPelican.every(({ score }) => score < 1), "a memorised pelican must not ace other animals");
-assert.ok(nonPelican.reduce((a, { score }) => a + score, 0) / nonPelican.length < referenceMean - 0.1, "memorised answer must sit below the reference policy");
+// The real memorised-reference attack: replay every task's own reference drawing
+// against every other task. One memorised SVG must not separate from a wrong
+// answer: no pair may exceed 0.4, the mismatched mean stays under 0.3, and the
+// best single reference to memorise averages under 0.4 across the suite.
+async function memorisedReferenceProbe(splitTasks, bench) {
+  const perReference = [];
+  const mismatched = [];
+  for (const [index, source] of splitTasks.entries()) {
+    const row = [];
+    for (const [target, task] of splitTasks.entries()) {
+      if (index === target) continue;
+      const { score } = await bench.score(task, { answer: String(source.expected) });
+      row.push(score);
+      mismatched.push(score);
+      assert.ok(score <= 0.4, `reference of ${source.id} scores ${score} on ${task.id}`);
+    }
+    perReference.push({ id: source.id, mean: row.reduce((a, b) => a + b, 0) / row.length });
+  }
+  const mismatchedMean = mismatched.reduce((a, b) => a + b, 0) / mismatched.length;
+  const best = perReference.reduce((top, entry) => (entry.mean > top.mean ? entry : top));
+  assert.ok(mismatchedMean <= 0.3, `mismatched reference mean ${mismatchedMean} must be <= 0.3`);
+  assert.ok(best.mean <= 0.4, `best memorised reference ${best.id} averages ${best.mean}, must be <= 0.4`);
+  return {
+    pairwise_max: Math.max(...mismatched),
+    mismatched_mean: Math.round(mismatchedMean * 1000) / 1000,
+    best_reference: { id: best.id, mean: Math.round(best.mean * 1000) / 1000 },
+  };
+}
+const memorisedReference = await memorisedReferenceProbe(tasks, benchmark);
+
+// A model sees only the system text and task.prompt, so every part the grader
+// checks must be stated there.
+for (const task of tasks) {
+  const parts = task.metadata?.requiredParts ?? [];
+  const specific = parts.filter((part) => !GATE_PARTS.includes(part));
+  assert.ok(specific.length >= 3, `${task.id} needs at least 3 task-specific parts`);
+  const lower = String(task.prompt).toLowerCase();
+  for (const part of parts) {
+    const phrase = PART_PHRASES[part] ?? part;
+    assert.ok(lower.includes(phrase), `${task.id} prompt does not state "${phrase}"`);
+  }
+}
 
 // Honest formatting must score high: one fence, prose wrap, prolog, comments,
 // text-bearing elements, and the five XML entities are all accepted.
@@ -122,6 +156,16 @@ const publicPrompts = new Set(tasks.map((task) => task.prompt));
 assert.ok(hiddenTasks.every((task) => !publicPrompts.has(task.prompt)), "hidden prompts must differ from public prompts");
 const hiddenCross = await Promise.all(hiddenTasks.map((task) => hiddenBenchmark.score(task, { answer: canonical })));
 assert.ok(hiddenCross.every(({ score }) => score < 1), "a public reference must score below 1 on hidden tasks");
+const hiddenReferenceScores = await Promise.all(hiddenTasks.map((task) => hiddenBenchmark.score(task, { answer: String(task.expected) })));
+assert.ok(hiddenReferenceScores.every(({ score }) => score === 1), "every hidden reference must score exactly 1");
+const hiddenMemorisedReference = await memorisedReferenceProbe(hiddenTasks, hiddenBenchmark);
+for (const task of hiddenTasks) {
+  const lower = String(task.prompt).toLowerCase();
+  for (const part of task.metadata?.requiredParts ?? []) {
+    const phrase = PART_PHRASES[part] ?? part;
+    assert.ok(lower.includes(phrase), `${task.id} prompt does not state "${phrase}"`);
+  }
+}
 const hiddenCli = JSON.parse((await execFile(process.execPath, ["dist/cli.js", "run", "--model", "offline", "--provider", "mock", "--tasks", "artifacts/tasks.hidden.jsonl", "--json"], { maxBuffer: 1_000_000 })).stdout);
 assert.equal(hiddenCli.rows.length, 30);
 assert.ok(Array.isArray(hiddenCli.checkSummary) && hiddenCli.checkSummary.length > 0, "run report must expose the check breakdown");
@@ -171,8 +215,8 @@ const artifact = {
   task_count: report.rows.length, scores: report.rows.map((row) => row.score),
   adversarial_scores: adversarialScores,
   honest_answer_scores: honestScores,
-  memorised_nonmatching_mean: Math.round(nonPelican.reduce((a, { score }) => a + score, 0) / nonPelican.length * 1000) / 1000,
-  hidden_split: { tasks: hiddenTasks.length, public_reference_max: Math.max(...hiddenCross.map(({ score }) => score)) },
+  memorised_reference: memorisedReference,
+  hidden_split: { tasks: hiddenTasks.length, public_reference_max: Math.max(...hiddenCross.map(({ score }) => score)), memorised_reference: hiddenMemorisedReference },
   reference_score_range: [Math.min(...referenceScores.map(({ score }) => score)), Math.max(...referenceScores.map(({ score }) => score))],
   route_status_codes: routes, tool_names: toolNames,
 };

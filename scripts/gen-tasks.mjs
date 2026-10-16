@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { GATE_PARTS, PART_PHRASES } from "./parts.mjs";
+import { GATE_PARTS, PART_HINTS, PART_PHRASES } from "./parts.mjs";
 
 const argv = process.argv.slice(2);
 function option(name, fallback) {
@@ -43,18 +43,18 @@ const ANIMALS = {
     stork: { beak: "long pointed beak", neck: "long neck", legs: "long legs", body: "level body", extras: [] },
     heron: { beak: "pointed beak", neck: "long neck", legs: "long legs", body: "level body", extras: [] },
     duck: { beak: "flat beak", neck: "short neck", legs: "legs", body: "level body", extras: [] },
-    goose: { beak: "orange beak", neck: "long neck", legs: "legs", body: "level body", extras: [] },
+    goose: { beak: "pointed beak", neck: "long neck", legs: "legs", body: "level body", extras: [] },
     parrot: { beak: "hooked beak", neck: "short neck", legs: "legs", body: "level body", extras: ["tail feathers"] },
     penguin: { beak: "short beak", neck: "short neck", legs: "legs", body: "upright body", extras: [] },
-    swan: { beak: "curved beak", neck: "long neck", legs: "legs", body: "level body", extras: [] },
+    swan: { beak: "thin curved beak", neck: "long neck", legs: "legs", body: "level body", extras: [] },
   },
   hidden: {
-    owl: { beak: "small hooked beak", neck: "short neck", legs: "legs", body: "upright body", extras: [] },
+    owl: { beak: "hooked beak", neck: "short neck", legs: "legs", body: "upright body", extras: [] },
     crane: { beak: "long pointed beak", neck: "long neck", legs: "long legs", body: "level body", extras: [] },
     ibis: { beak: "thin curved beak", neck: "long neck", legs: "long legs", body: "level body", extras: [] },
     puffin: { beak: "tall colourful beak", neck: "short neck", legs: "legs", body: "upright body", extras: [] },
     raven: { beak: "pointed beak", neck: "short neck", legs: "legs", body: "level body", extras: ["tail feathers"] },
-    seagull: { beak: "orange beak", neck: "short neck", legs: "legs", body: "level body", extras: [] },
+    seagull: { beak: "pointed beak", neck: "short neck", legs: "legs", body: "level body", extras: [] },
     kiwi: { beak: "thin curved beak", neck: "short neck", legs: "long legs", body: "upright body", extras: [] },
     ostrich: { beak: "short beak", neck: "long neck", legs: "long legs", body: "upright body", extras: [] },
     vulture: { beak: "hooked beak", neck: "long neck", legs: "legs", body: "level body", extras: [] },
@@ -80,7 +80,7 @@ const VEHICLES = {
     "track bicycle": { bars: "drop handlebars", tires: "smooth tires", extras: [], wheelbase: 350, wheelR: 68, tire: 7 },
     "commuter bicycle": { bars: "handlebars", tires: "smooth tires", extras: ["rear rack"], wheelbase: 340, wheelR: 65, tire: 10 },
     "hybrid bicycle": { bars: "handlebars", tires: "knobby tires", extras: [], wheelbase: 338, wheelR: 67, tire: 12 },
-    "fat bike": { bars: "handlebars", tires: "fat tires", extras: [], wheelbase: 345, wheelR: 72, tire: 22 },
+    "fat bike": { bars: "handlebars", tires: "fat tires", extras: [], wheelbase: 345, wheelR: 72, tire: 26 },
   },
 };
 
@@ -101,10 +101,11 @@ function partsFor(animal, aspect, vehicle, spec) {
     wheelSize, wheelbaseClass, ...tires, ...spec.extras,
   ];
   const requiredParts = [...new Set([...GATE_PARTS, ...specific])];
-  const birdLegs = aspect.legs === "long legs" ? "long legs reaching the pedals" : "legs reaching the pedals";
-  const animalText = `${article(aspect.beak)} ${aspect.beak}, ${article(aspect.neck)} ${aspect.neck}, ${article(aspect.body)} ${aspect.body}, a head, and ${birdLegs}${aspect.extras.length ? `, plus ${aspect.extras.join(" and ")}` : ""}`;
-  const extras = spec.extras.map((extra) => `${article(extra)} ${extra}`).join(" and ");
-  const vehicleText = `two wheels, a bicycle frame, ${spec.bars}, pedals, ${wheelSize}, ${article(wheelbaseClass)} ${wheelbaseClass}, ${tires.join(" and ")}${extras ? `, plus ${extras}` : ""}`;
+  const hint = (part) => (PART_HINTS[part] ? ` (${PART_HINTS[part]})` : "");
+  const birdLegs = aspect.legs === "long legs" ? `long legs reaching the pedals${hint("long legs")}` : "legs reaching the pedals";
+  const animalText = `${article(aspect.beak)} ${aspect.beak}${hint(aspect.beak)}, ${article(aspect.neck)} ${aspect.neck}${hint(aspect.neck)}, ${article(aspect.body)} ${aspect.body}${hint(aspect.body)}, a head, and ${birdLegs}${aspect.extras.length ? `, plus ${aspect.extras.map((extra) => `${extra} ${hint(extra)}`).join(" and ")}` : ""}`;
+  const extras = spec.extras.map((extra) => `${article(extra)} ${extra}${hint(extra)}`).join(" and ");
+  const vehicleText = `two wheels, a bicycle frame, ${spec.bars}${hint(spec.bars)}, pedals, ${wheelSize}${hint(wheelSize)}, ${article(wheelbaseClass)} ${wheelbaseClass}${hint(wheelbaseClass)}, ${tires.map((tire) => `${tire}${hint(tire)}`).join(" and ")}${extras ? `, plus ${extras}` : ""}`;
   const clause = ` The ${animal} has ${animalText}. The ${vehicle} has ${vehicleText}.`;
   return { requiredParts, clause };
 }
@@ -167,23 +168,23 @@ function bicycleSvg(spec, random) {
   return { parts, wheels: { rearX, frontX, cy, radius }, bbX, bbY, seatY };
 }
 
-// Beak geometry lives ahead of the head centre (head always sits front-top of the body).
+// Beak geometry lives ahead of the head centre (head always sits front-top of
+// the body). Every length and depth is a multiple of the head width D, matching
+// the numbers the prompts state and the grader measures.
 function beakSvg(style, head, colour) {
   const { hx, hy, hr } = head;
   const tipX = hx + hr;
+  const d = (k) => round(k * hr * 2);
   switch (style) {
-    case "pouch beak": return `<path d="M${tipX - 6} ${hy - 6}L${hx + hr + 118} ${hy + 8}L${tipX - 6} ${hy + 16}Z" fill="${colour}" stroke="#9c6644" stroke-width="4"/><path d="M${tipX} ${hy + 14}q62 42 116 8q-52 52 -116 -8" fill="#f6bd60" stroke="#9c6644" stroke-width="4"/>`;
-    case "curved beak": return `<path d="M${tipX - 4} ${hy - 2}q36 6 28 46q-26 -16 -28 -46" fill="${colour}"/>`;
-    case "large beak": return `<path d="M${tipX - 8} ${hy - 12}Q${hx + hr + 150} ${hy - 14} ${hx + hr + 142} ${hy + 12}Q${hx + hr + 110} ${hy + 34} ${tipX - 8} ${hy + 18}Z" fill="${colour}" stroke="#9c6644" stroke-width="4"/>`;
-    case "long pointed beak": return `<path d="M${tipX - 6} ${hy - 4}L${hx + hr + 148} ${hy + 6}L${tipX - 6} ${hy + 12}Z" fill="${colour}" stroke="#9c6644" stroke-width="3"/>`;
-    case "flat beak": return `<path d="M${tipX - 6} ${hy}L${hx + hr + 62} ${hy + 6}L${tipX - 6} ${hy + 13}Z" fill="${colour}"/>`;
-    case "orange beak": return `<path d="M${tipX - 6} ${hy - 2}L${hx + hr + 46} ${hy + 5}L${tipX - 6} ${hy + 12}Z" fill="${colour}"/>`;
-    case "hooked beak": return `<path d="M${tipX - 4} ${hy - 8}q32 2 24 32q-26 -8 -24 -32" fill="${colour}"/>`;
-    case "short beak": return `<path d="M${tipX - 4} ${hy}L${hx + hr + 34} ${hy + 5}L${tipX - 4} ${hy + 10}Z" fill="${colour}"/>`;
-    case "small hooked beak": return `<path d="M${tipX - 2} ${hy - 4}q24 0 18 24q-20 -6 -18 -24" fill="${colour}"/>`;
-    case "thin curved beak": return `<path d="M${tipX - 4} ${hy + 2}q74 8 86 46q-16 -44 -86 -52Z" fill="${colour}"/>`;
-    case "tall colourful beak": return `<path d="M${tipX - 8} ${hy - 18}q46 6 40 52q-42 -8 -40 -52Z" fill="${colour}" stroke="#9c6644" stroke-width="3"/>`;
-    case "pointed beak": return `<path d="M${tipX - 6} ${hy - 3}L${hx + hr + 84} ${hy + 6}L${tipX - 6} ${hy + 12}Z" fill="${colour}"/>`;
+    case "pouch beak": return `<path d="M${tipX - 6} ${hy - 6}L${round(tipX + hr * 2.9)} ${hy + 8}L${tipX - 6} ${hy + 16}Z" fill="${colour}" stroke="#9c6644" stroke-width="4"/><path d="M${tipX} ${hy + 14}q${d(0.8)} ${d(0.55)} ${d(1.5)} ${d(0.1)}q${d(-0.7)} ${d(0.65)} ${d(-1.5)} ${d(-0.1)}" fill="#f6bd60" stroke="#9c6644" stroke-width="4"/>`;
+    case "large beak": return `<path d="M${tipX - 8} ${hy - d(0.18)}Q${round(tipX + d(1.6))} ${hy - d(0.2)} ${round(tipX + d(1.5))} ${hy + d(0.15)}Q${round(tipX + d(1.15))} ${hy + d(0.42)} ${tipX - 8} ${hy + d(0.22)}Z" fill="${colour}" stroke="#9c6644" stroke-width="4"/>`;
+    case "long pointed beak": return `<path d="M${tipX - 6} ${hy - 4}L${round(tipX + d(1.8))} ${hy + 6}L${tipX - 6} ${hy + 12}Z" fill="${colour}" stroke="#9c6644" stroke-width="3"/>`;
+    case "pointed beak": return `<path d="M${tipX - 6} ${hy - 3}L${round(tipX + d(1.1))} ${hy + 6}L${tipX - 6} ${hy + 12}Z" fill="${colour}"/>`;
+    case "flat beak": return `<path d="M${tipX - 6} ${hy}L${round(tipX + d(0.85))} ${hy + 4}L${tipX - 6} ${hy + d(0.11)}Z" fill="${colour}"/>`;
+    case "thin curved beak": return `<path d="M${tipX - 4} ${hy + 2}q${d(0.95)} ${d(0.1)} ${d(1.1)} ${d(0.5)}q${d(-0.2)} ${d(-0.5)} ${d(-1.1)} ${d(-0.55)}Z" fill="${colour}"/>`;
+    case "hooked beak": return `<path d="M${tipX - 4} ${hy - 8}q${d(0.45)} ${d(0.03)} ${d(0.36)} ${d(0.42)}q${d(-0.36)} ${d(-0.1)} ${d(-0.36)} ${d(-0.42)}" fill="${colour}"/>`;
+    case "tall colourful beak": return `<path d="M${tipX - 8} ${hy - d(0.24)}q${d(0.6)} ${d(0.08)} ${d(0.55)} ${d(0.68)}q${d(-0.55)} ${d(-0.1)} ${d(-0.55)} ${d(-0.68)}Z" fill="${colour}" stroke="#9c6644" stroke-width="3"/>`;
+    case "short beak": return `<path d="M${tipX - 4} ${hy}L${round(tipX + d(0.42))} ${hy + 5}L${tipX - 4} ${hy + d(0.13)}Z" fill="${colour}"/>`;
     default: throw new Error(`unknown beak style ${style}`);
   }
 }
@@ -205,9 +206,9 @@ function birdSvg(spec, wheels, random, palette) {
   parts.push(`<circle cx="${hx}" cy="${hy}" r="${hr}" fill="${palette.body}" stroke="#33343a" stroke-width="5"/>`);
   parts.push(`<circle cx="${hx + 14}" cy="${hy - 10}" r="5" fill="#22252b"/>`);
   parts.push(beakSvg(spec.beak, head, palette.beak));
-  // Long-legged birds start their legs well up the body so the strokes are
-  // visibly longer than a sitting bird's.
-  const legY = spec.legs === "long legs" ? round(bodyCy + bodyRy * 0.35) : bodyCy + bodyRy - 6, pedalY = wheels.bbY - 2;
+  // Long-legged birds start their legs well inside the body so the strokes are
+  // clearly longer than the gap between the body and the wheels.
+  const legY = spec.legs === "long legs" ? round(bodyCy - bodyRy * 0.25) : bodyCy + bodyRy - 6, pedalY = wheels.bbY - 2;
   const legStroke = spec.legs === "long legs" ? 6 : 13;
   const legSpread = upright ? 30 : 44;
   parts.push(`<path d="M${bx - legSpread} ${legY}Q${bx - legSpread - 8} ${round((legY + pedalY) / 2)} ${bx - legSpread + 10} ${pedalY}M${bx + legSpread - 14} ${legY + 4}Q${bx + legSpread - 4} ${round((legY + pedalY) / 2)} ${bx + legSpread + 12} ${pedalY}" fill="none" stroke="${palette.legs}" stroke-width="${legStroke}" stroke-linecap="round"/>`);

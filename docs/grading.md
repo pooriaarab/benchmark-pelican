@@ -24,7 +24,13 @@ An honest reply is accepted even when it is not bare markup. The scanner takes t
 
 ## Safety and parsing
 
-The answer must stay below 50 KiB. The scanner rejects `script`, `foreignObject`, `image`, `use`, `a`, `style`, and `animate` elements, event attributes, CSS `url()` values that are not local fragments, and non-fragment `href` values. Text content is only allowed inside `title`, `desc`, `text`, and `tspan` elements. Path bounds are computed by replaying `M L H V C S Q T A Z` commands, including relative forms.
+The answer must stay below 50 KiB. The scanner rejects `script`, `foreignObject`, `image`, `use`, `a`, and `animate` elements, event attributes, CSS `url()` values that are not local fragments, and non-fragment `href` values. Text content is only allowed inside `title`, `desc`, `text`, `tspan`, and `style` elements. A `style` element may only hold `.class { prop: value }` rules for paint properties (fill, stroke, stroke-width, dash pattern, line caps); any other CSS — at-rules, element or id selectors, urls — is rejected. Path bounds are computed by replaying `M L H V C S Q T A Z` commands, including relative forms.
+
+Fill and stroke are resolved the way a renderer would: inherited from ancestors (`<g fill="...">`), then the element's own presentation attribute, then matching `style` class rules, then inline `style="..."`. A shape with no fill anywhere paints its default black.
+
+## Measuring against the drawing, not the canvas
+
+Every geometric check is measured against the drawing's own extent — the bounding box of its visible shapes — or against named parts (the head width, the wheel radius, the wheelbase, the gap between body and wheel line). Nothing is measured against the `viewBox` or `width`/`height`, so scaling or translating the whole drawing leaves every check, and the score, unchanged. The E2E proves this by rescaling and shifting every reference drawing and asserting identical scores.
 
 ## Checks and scoring
 
@@ -37,7 +43,7 @@ taskFit = 0.4 ^ (missed required task-specific parts + unrequested task-specific
 
 The shared gate holds the checks every task asks for: safe well-formed markup, two wheels, a bicycle frame, handlebars, pedals, a bird body, a bird head, a beak, legs reaching the pedals, and canvas coverage. The task fit holds the parts that change per task: the named animal's beak style, neck, body posture, legs and extras, and the named vehicle's handlebar style, wheel size, wheelbase class, tire class, and extras. A memorised drawing of the wrong bird fails the specific checks instead of coasting on the shared ones, and a drawing that adds parts the task never asked for is penalised the same way.
 
-Each task's `metadata.requiredParts` lists the parts the prompt states; the generator asserts every checked part appears in the prompt text, so a model can draw a full score from the prompt alone. The E2E replays every task's reference drawing on every other task in both splits, so the separation is measured rather than assumed.
+Each task's `metadata.requiredParts` lists the parts the prompt states; the generator asserts every checked part appears in the prompt text, and each prompt spells out what the grader measures in plain terms ("an orange or yellow beak clearly longer than the head is wide"). The E2E includes a prompt-only policy that parses the prompt text alone and draws simple literal shapes; it earns at least 0.8 on all 30 public tasks and at least 25 of 30 hidden tasks, which is what "solvable from the prompt alone" means here: a drawing that follows every stated part earns about 1.0, and each missed or improvised specific part costs a 0.4x multiplier. The E2E also replays every task's reference drawing on every other task in both splits, so the separation is measured rather than assumed.
 
 ### Shared gate checks
 
@@ -45,7 +51,7 @@ Each task's `metadata.requiredParts` lists the parts the prompt states; the gene
 | --- | ---: | --- |
 | svg canvas | 0.05 | One `svg` root with positive dimensions or a positive `viewBox` |
 | complexity | 0.08 | 12 to 200 visible geometry elements |
-| coverage | 0.02 | Non-background geometry covers a useful fraction of both axes |
+| coverage | 0.02 | The drawing's own extent is non-degenerate: a landscape scene, not a thin strip |
 | two wheels | 0.15 | Two separated, similarly sized circles or ellipses in the lower region |
 | bicycle frame | 0.11 | Stroked geometry spanning the gap between the wheels, above wheel centres |
 | handlebars | 0.06 | Stroked geometry in the front half of the bicycle, below the bird's head |
@@ -61,14 +67,14 @@ Each task requires its own subset, and a passing check the task did not request 
 
 | Check | Evidence |
 | --- | --- |
-| beak styles | Exactly one of: pouch, curved, large, long pointed, flat, orange, hooked, short, small hooked, thin curved, tall colourful, pointed |
+| beak styles | Exactly one, all measured against the head width D: pouch (a second warm shape hanging below), large (longer and deeper than the head is wide), long pointed (straight, at least 1.6 D), pointed (straight, 0.75-1.6 D), flat (straight, at least 4x wider than tall, at most 1.05 D), thin curved (curved downward, at least 0.85 D), tall colourful (at least 0.55 D deep), hooked (curved, under 0.85 D), short (straight, under 0.65 D) |
 | neck | `long neck` (a stroked bridge from body to head) or `short neck` |
 | body posture | `upright body` (at least as tall as wide) or `level body` |
-| long legs | Thin leg strokes longer than 12% of canvas height, or any leg stroke over 27% |
+| long legs | A thin leg stroke spanning at least 1.25 times the gap between the body's underside and the wheel line |
 | tail feathers | Filled geometry with real height behind the body |
 | bar styles | Exactly one of: drop handlebars, swept handlebars, or plain handlebars |
-| wheel size | `small wheels` (under 8% of canvas width) or `full-size wheels` |
-| wheelbase | `long wheelbase` (wheel separation over 60% of canvas width) or `standard wheelbase` |
+| wheel size | `small wheels` (radius under 7.5% of the drawing's width) or `full-size wheels` |
+| wheelbase | `long wheelbase` (wheel separation over 60% of the drawing's width) or `standard wheelbase` |
 | tires | `knobby tires` (thick tread or concentric outer ring), `fat tires` (very thick tread), or `smooth tires` |
 | extras | `second saddle`, `cargo box`, `rear rack`, `battery pack` |
 
@@ -84,6 +90,6 @@ If a drawing shows no bicycle evidence (no wheel pair and no frame) or no bird e
 
 ## Known limits
 
-This grader measures structural plausibility, not visual truth. It can claim that the parts each prompt names are present, shaped like the named part, and arranged plausibly; it cannot prove the species, posture, occlusion, or artistic quality. "Does it look like a pelican" belongs to the optional vision judge from the charter, which is not implemented in version 0.2.0 and stays off by default and unscored. A drawing of a different animal that happens to satisfy the same part list can still earn credit, and a valid drawing made mostly with transforms, nested viewports, or CSS can lose credit. Arc bounds are approximated by their endpoints.
+This grader measures structural plausibility, not visual truth. It can claim that the parts each prompt names are present, shaped like the named part, and arranged plausibly; it cannot prove the species, posture, occlusion, or artistic quality. "Does it look like a pelican" belongs to the optional vision judge from the charter, which is not implemented in version 0.2.0 and stays off by default and unscored. A drawing of a different animal that happens to satisfy the same part list can still earn credit, and a valid drawing made mostly with transforms or nested viewports can lose credit. Arc bounds are approximated by their endpoints.
 
 Structural and judged scores must remain separate if a later release adds the judge.

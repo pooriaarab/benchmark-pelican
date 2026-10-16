@@ -2,14 +2,17 @@ import type { JsonValue, Task, TaskScore } from "benchmark-core";
 
 const LIMIT = 50 * 1024;
 const SHAPES = new Set(["circle", "ellipse", "line", "path", "polygon", "polyline", "rect"]);
-const SAFE_ELEMENTS = new Set(["svg", "g", "defs", "path", "circle", "ellipse", "line", "polygon", "polyline", "rect", "lineargradient", "radialgradient", "stop", "clippath", "title", "desc", "text", "tspan"]);
-const TEXT_ELEMENTS = new Set(["title", "desc", "text", "tspan"]);
+const SAFE_ELEMENTS = new Set(["svg", "g", "defs", "path", "circle", "ellipse", "line", "polygon", "polyline", "rect", "lineargradient", "radialgradient", "stop", "clippath", "title", "desc", "text", "tspan", "style"]);
+const TEXT_ELEMENTS = new Set(["title", "desc", "text", "tspan", "style"]);
 const SAFE_ENTITY = /^&(?:amp|lt|gt|quot|apos|#\d{1,6}|#x[\da-f]{1,5});$/i;
-interface Element { name: string; attrs: Record<string, string>; numbers: number[]; curved: boolean; }
+// Presentation properties the grader reads from attributes, <style> class
+// rules, or inline style. Only these can reach the geometry checks.
+const PAINT_PROPS = new Set(["fill", "stroke", "stroke-width", "stroke-dasharray", "stroke-linecap", "stroke-linejoin", "opacity", "fill-opacity", "stroke-opacity"]);
+interface Element { name: string; attrs: Record<string, string>; numbers: number[]; curved: boolean; parent: number | undefined; paint: Record<string, string>; }
 interface Bounds { minX: number; minY: number; maxX: number; maxY: number; }
 interface Round { element: Element; bounds: Bounds; cx: number; cy: number; rx: number; ry: number; }
 interface Scene {
-  canvas: Bounds; width: number; height: number; geometry: { element: Element; bounds: Bounds }[];
+  extent: Bounds; width: number; height: number; geometry: { element: Element; bounds: Bounds }[];
   rounds: Round[]; stroked: { element: Element; bounds: Bounds }[];
   wheels: [Round, Round] | undefined; frameTop: number;
 }
@@ -104,6 +107,68 @@ function extract(answer: string): string | undefined {
     .replace(/<\?[\s\S]*?\?>/g, "").replace(/<!--[\s\S]*?-->/g, "").replace(/<![^>]*>/g, "");
 }
 
+// A <style> block may only hold `.class { prop: value; ... }` rules where every
+// property is a paint property. Anything else (at-rules, element or id
+// selectors, urls, expressions) is rejected, so stylesheet text can never pull
+// in external content or reprogram the document.
+function parseStyleRules(text: string): { cls: string; props: Record<string, string> }[] | string {
+  const cleaned = text.replace(/\/\*[\s\S]*?\*\//g, "");
+  const rules: { cls: string; props: Record<string, string> }[] = [];
+  let rest = cleaned;
+  const rule = /^\s*\.(-?[_a-zA-Z][\w-]*)\s*\{([^}]*)\}/;
+  while (rest.trim().length > 0) {
+    const match = rest.match(rule);
+    if (!match) return "style elements may only contain .class rules of paint properties";
+    const props: Record<string, string> = {};
+    for (const declaration of match[2]!.split(";")) {
+      const entry = declaration.trim();
+      if (!entry) continue;
+      const colon = entry.indexOf(":");
+      if (colon === -1) return "style elements may only contain .class rules of paint properties";
+      const prop = entry.slice(0, colon).trim().toLowerCase(), value = entry.slice(colon + 1).trim();
+      if (!PAINT_PROPS.has(prop) || !value || /[()@!]/.test(value)) return "style elements may only contain .class rules of paint properties";
+      props[prop] = value;
+    }
+    rules.push({ cls: match[1]!, props });
+    rest = rest.slice(match[0].length);
+  }
+  return rules;
+}
+
+// Inline style="..." is read leniently: only whitelisted paint properties are
+// seen, and a declaration whose value could call out (url, expression) is
+// skipped. The document-level url() and handler checks already ran.
+function inlinePaint(style: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const declaration of style.split(";")) {
+    const colon = declaration.indexOf(":");
+    if (colon === -1) continue;
+    const prop = declaration.slice(0, colon).trim().toLowerCase(), value = declaration.slice(colon + 1).trim();
+    if (PAINT_PROPS.has(prop) && value && !/[()@!]/.test(value)) out[prop] = value;
+  }
+  return out;
+}
+
+// Resolves each element's effective paint: inherited value, then presentation
+// attribute, then matching class rules in order, then inline style. An
+// unspecified fill means the shape paints black, as a renderer would show it.
+function resolvePaint(elements: Element[], rules: { cls: string; props: Record<string, string> }[]): void {
+  for (let index = 0; index < elements.length; index++) {
+    const chain: number[] = [];
+    for (let cursor: number | undefined = index; cursor !== undefined; cursor = elements[cursor]!.parent) chain.unshift(cursor);
+    const paint: Record<string, string> = {};
+    for (const member of chain) {
+      const element = elements[member]!;
+      for (const prop of PAINT_PROPS) if (element.attrs[prop] !== undefined) paint[prop] = element.attrs[prop]!;
+      const classes = element.attrs.class?.split(/\s+/).filter(Boolean) ?? [];
+      for (const rule of rules) if (classes.includes(rule.cls)) Object.assign(paint, rule.props);
+      if (element.attrs.style) Object.assign(paint, inlinePaint(element.attrs.style));
+    }
+    if (SHAPES.has(elements[index]!.name) && paint.fill === undefined) paint.fill = "#000";
+    elements[index]!.paint = paint;
+  }
+}
+
 function scan(answer: string): { scene: Scene } | string {
   if (Buffer.byteLength(answer, "utf8") > LIMIT) return "answer exceeds 50 KiB";
   const svg = extract(answer);
@@ -114,16 +179,21 @@ function scan(answer: string): { scene: Scene } | string {
 
   const tags = [...svg.matchAll(/<\s*(\/)?\s*([a-z][\w:-]*)\b([^<>]*?)(\/)?\s*>/gi)];
   if (tags.length === 0) return "no SVG markup found";
-  const stack: string[] = [];
+  const stack: number[] = [];
   const elements: Element[] = [];
+  const styleTexts: string[] = [];
   let cursor = 0;
   for (const tag of tags) {
     const textNode = svg.slice(cursor, tag.index);
-    if (textNode.trim() && !TEXT_ELEMENTS.has(stack[stack.length - 1] ?? "")) return "text is only allowed inside title, desc, text, or tspan elements";
+    if (textNode.trim()) {
+      const parent = stack.length ? elements[stack[stack.length - 1]!] : undefined;
+      if (parent?.name === "style") styleTexts.push(textNode);
+      else if (!TEXT_ELEMENTS.has(parent?.name ?? "")) return "text is only allowed inside title, desc, text, tspan, or style elements";
+    }
     cursor = tag.index! + tag[0].length;
     const name = tag[2]!.toLowerCase();
     if (tag[1]) {
-      if (stack.pop() !== name) return "SVG tags are unbalanced";
+      if (elements[stack.pop()!]?.name !== name) return "SVG tags are unbalanced";
       continue;
     }
     if (!SAFE_ELEMENTS.has(name)) return `element <${name}> is not allowed`;
@@ -134,8 +204,8 @@ function scan(answer: string): { scene: Scene } | string {
     if (Object.keys(attrs).some((key) => key.startsWith("on"))) return "event handlers are not allowed";
     const numericSource = attrs.d ?? attrs.points ?? "";
     const numbers = [...numericSource.matchAll(/-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/gi)].map((match) => Number(match[0]));
-    elements.push({ name, attrs, numbers, curved: /[qcsat]/i.test(attrs.d ?? "") });
-    if (!tag[4]) stack.push(name);
+    elements.push({ name, attrs, numbers, curved: /[qcsat]/i.test(attrs.d ?? ""), parent: stack[stack.length - 1], paint: {} });
+    if (!tag[4]) stack.push(elements.length - 1);
   }
   if (svg.slice(cursor).trim()) return "trailing text after the SVG root";
   if (stack.length !== 0 || elements[0]?.name !== "svg" || elements.filter((element) => element.name === "svg").length !== 1) return "SVG must have one balanced root";
@@ -149,17 +219,30 @@ function scan(answer: string): { scene: Scene } | string {
   }
   if (!canvas) return "SVG root needs positive dimensions or viewBox";
 
-  const width = canvas.maxX - canvas.minX, height = canvas.maxY - canvas.minY;
+  const rules = parseStyleRules(styleTexts.join("\n"));
+  if (typeof rules === "string") return rules;
+  resolvePaint(elements, rules);
+
   const geometry = elements.filter((element) => SHAPES.has(element.name)).map((element) => ({ element, bounds: bounds(element) })).filter((item): item is { element: Element; bounds: Bounds } => item.bounds !== undefined);
+  // The drawing's own extent is the union of every visible shape, ignoring a
+  // background rectangle that covers the canvas. Every geometric check below
+  // is measured against this extent or against named parts, never against the
+  // canvas or viewBox, so scaling or translating the scene changes nothing.
+  const canvasWidth = canvas.maxX - canvas.minX, canvasHeight = canvas.maxY - canvas.minY;
+  const useful = geometry.filter((item) => !(item.element.name === "rect" && item.bounds.maxX - item.bounds.minX > canvasWidth * 0.9 && item.bounds.maxY - item.bounds.minY > canvasHeight * 0.9));
+  const extent = useful.length
+    ? useful.reduce((all, item) => ({ minX: Math.min(all.minX, item.bounds.minX), minY: Math.min(all.minY, item.bounds.minY), maxX: Math.max(all.maxX, item.bounds.maxX), maxY: Math.max(all.maxY, item.bounds.maxY) }), { ...useful[0]!.bounds })
+    : { ...canvas };
+  const width = extent.maxX - extent.minX, height = extent.maxY - extent.minY;
   const rounds = geometry.filter(({ element }) => element.name === "circle" || element.name === "ellipse").map((item) => ({ ...item, cx: (item.bounds.minX + item.bounds.maxX) / 2, cy: (item.bounds.minY + item.bounds.maxY) / 2, rx: (item.bounds.maxX - item.bounds.minX) / 2, ry: (item.bounds.maxY - item.bounds.minY) / 2 }));
-  const stroked = geometry.filter(({ element }) => element.attrs.stroke && element.attrs.stroke !== "none");
-  const wheelCandidates = rounds.filter((round) => round.cy > canvas.minY + height * 0.55 && round.rx > width * 0.035 && round.ry > height * 0.05);
+  const stroked = geometry.filter(({ element }) => element.paint.stroke && element.paint.stroke !== "none");
+  const wheelCandidates = rounds.filter((round) => round.cy > extent.minY + height * 0.5 && round.rx > width * 0.025 && round.ry > height * 0.035);
   let wheels: [Round, Round] | undefined;
   for (const left of wheelCandidates) for (const right of wheelCandidates) {
     const ratio = Math.max(left.rx, right.rx) / Math.min(left.rx, right.rx);
     if (right.cx - left.cx > width * 0.3 && ratio <= 1.35 && (!wheels || right.cx - left.cx > wheels[1].cx - wheels[0].cx)) wheels = [left, right];
   }
-  return { scene: { canvas, width, height, geometry, rounds, stroked, wheels, frameTop: wheels ? wheels[0].cy - height * 0.08 : canvas.minY + height * 0.7 } };
+  return { scene: { extent, width, height, geometry, rounds, stroked, wheels, frameTop: wheels ? wheels[0].cy - height * 0.08 : extent.minY + height * 0.7 } };
 }
 
 // Orange through yellow hues; cream and near-white fills do not count as a beak.
@@ -191,71 +274,84 @@ const overlap = (a: Bounds, b: Bounds, pad = 0) => a.minX <= b.maxX + pad && a.m
 const span = (b: Bounds) => ({ w: b.maxX - b.minX, h: b.maxY - b.minY });
 
 function sceneChecks(scene: Scene) {
-  const { canvas, width, height, geometry, rounds, stroked, wheels } = scene;
+  const { extent, width, height, geometry, rounds, stroked, wheels } = scene;
+  const wheelbase = wheels ? wheels[1].cx - wheels[0].cx : width * 0.5;
   const between = (item: { bounds: Bounds }) => wheels && item.bounds.minX <= wheels[1].cx && item.bounds.maxX >= wheels[0].cx;
-  const upper = (item: { bounds: Bounds }) => item.bounds.minY < canvas.minY + height * 0.55;
-  const bodies = rounds.filter((round) => round.cy < canvas.minY + height * 0.58 && round.rx > width * 0.05 && round.ry > height * 0.06 && (!wheels || round.cy < wheels[0].cy - height * 0.12));
+  const upper = (item: { bounds: Bounds }) => item.bounds.minY < extent.minY + height * 0.55;
+  const bodies = rounds.filter((round) => round.cy < extent.minY + height * 0.55 && round.rx > width * 0.045 && round.ry > height * 0.05 && (!wheels || round.cy < wheels[0].cy - height * 0.1));
   // The body is the largest upper-region round, so a head circle cannot win.
   const body = bodies.reduce<Round | undefined>((best, round) => !best || round.rx * round.ry > best.rx * best.ry ? round : best, undefined);
-  const head = body && rounds.find((round) => round !== body && round.rx >= width * 0.015 && round.rx <= Math.max(body.rx * 0.75, width * 0.02) && round.ry <= Math.max(body.ry * 0.9, height * 0.03) && round.cy < body.cy && round.cx > body.cx - body.rx * 0.35 && round.cx < canvas.maxX);
-  const warms = geometry.filter((item) => warm(item.element.attrs.fill) && upper(item) && span(item.bounds).w > width * 0.02);
+  const head = body && rounds.find((round) => round !== body && round.rx >= width * 0.012 && round.rx <= Math.max(body.rx * 0.75, width * 0.02) && round.ry <= Math.max(body.ry * 0.9, height * 0.03) && round.cy < body.cy && round.cx > body.cx - body.rx * 0.35 && round.cx < extent.maxX);
+  const warms = geometry.filter((item) => warm(item.element.paint.fill) && upper(item) && span(item.bounds).w > width * 0.02);
   const headZone = head ? { minX: head.cx - head.rx * 0.4, minY: head.bounds.minY - head.rx, maxX: head.bounds.maxX + head.rx * 4, maxY: head.bounds.maxY + head.rx * 1.6 } : undefined;
   const beaks = headZone ? warms.filter((item) => overlap(item.bounds, headZone)) : warms;
   const pedalZone = wheels ? { minX: wheels[0].cx, minY: wheels[0].cy - height * 0.3, maxX: wheels[1].cx, maxY: wheels[0].cy } : undefined;
-  const legReaches = (item: { bounds: Bounds }, zone: Bounds) => item.bounds.minY > canvas.minY + height * 0.3 && item.bounds.minY < canvas.minY + height * 0.72 && item.bounds.maxY >= zone.minY + height * 0.12 && item.bounds.maxY <= zone.maxY + height * 0.08 && item.bounds.maxX > zone.minX - width * 0.1 && item.bounds.minX < zone.maxX + width * 0.1;
+  const legReaches = (item: { bounds: Bounds }, zone: Bounds) => item.bounds.minY > extent.minY + height * 0.28 && item.bounds.minY < extent.minY + height * 0.72 && item.bounds.maxY >= zone.minY + height * 0.12 && item.bounds.maxY <= zone.maxY + height * 0.08 && item.bounds.maxX > zone.minX - width * 0.1 && item.bounds.minX < zone.maxX + width * 0.1;
   const legsToPedals = Boolean(pedalZone && (stroked.filter((item) => legReaches(item, pedalZone) && (span(item.bounds).h > height * 0.12 || span(item.bounds).w > width * 0.06)).length >= 2 || stroked.some((item) => legReaches(item, pedalZone) && span(item.bounds).h > height * 0.14)));
 
-  const barZone = (item: { bounds: Bounds }) => Boolean(wheels && item.bounds.minY < wheels[0].cy - height * 0.15 && item.bounds.maxY < wheels[0].cy + height * 0.02 && item.bounds.maxX > wheels[1].cx - (wheels[1].cx - wheels[0].cx) * 0.45 && span(item.bounds).w > width * 0.03);
-  const beakHasCurve = beaks.some((item) => item.element.curved);
-  const pouch = beaks.some((item, i) => beaks.some((other, j) => i !== j && overlap(item.bounds, other.bounds, width * 0.02) && other.bounds.minY > item.bounds.minY + 4));
+  const barZone = (item: { bounds: Bounds }) => Boolean(wheels && item.bounds.minY < wheels[0].cy - height * 0.15 && item.bounds.maxY < wheels[0].cy + height * 0.02 && item.bounds.maxX > wheels[1].cx - wheelbase * 0.45 && span(item.bounds).w > width * 0.03);
   // The union of the warm geometry near the head classifies into exactly one
   // beak style, so a drawing can satisfy at most one beak check at a time.
   const beakUnion = beaks.reduce<Bounds | undefined>((all, item) => all ? { minX: Math.min(all.minX, item.bounds.minX), minY: Math.min(all.minY, item.bounds.minY), maxX: Math.max(all.maxX, item.bounds.maxX), maxY: Math.max(all.maxY, item.bounds.maxY) } : item.bounds, undefined);
   const beakDim = beakUnion ? span(beakUnion) : { w: 0, h: 0 };
+  const beakHasCurve = beaks.some((item) => item.element.curved);
+  // A pouch is a second warm shape hanging clearly below the rest of the beak.
+  const headWidth = head ? head.rx * 2 : 0;
+  const pouch = Boolean(head && beaks.some((item, i) => beaks.some((other, j) => i !== j && overlap(item.bounds, other.bounds, width * 0.02) && other.bounds.minY > item.bounds.minY + head.rx * 0.15)));
+  // Every beak measure is relative to the head it hangs on, so the prompt can
+  // state each check in plain terms ("a beak about as long as the head is
+  // wide") and the same drawing earns the same class at any size.
   const beakStyle = (() => {
-    if (beaks.length === 0) return undefined;
+    if (!head || beaks.length === 0 || beakUnion === undefined) return undefined;
+    const length = beakDim.w / headWidth, depth = beakDim.h / headWidth, ratio = beakDim.w / Math.max(beakDim.h, 1);
     if (pouch) return "pouch beak";
-    const w = beakDim.w / width, h = beakDim.h / height, ratio = beakDim.w / Math.max(beakDim.h, 1);
-    if (!beakHasCurve) {
-      if (w > 0.18 && ratio >= 4) return "long pointed beak";
-      if (w > 0.16) return "large beak";
-      if (w >= 0.12 && ratio >= 3) return "pointed beak";
-      if (w >= 0.09 && ratio >= 3 && h <= 0.05) return "flat beak";
-      if (w < 0.075) return "short beak";
-      if (w < 0.14) return "orange beak";
-      return "beak";
+    if (beakHasCurve) {
+      if (length >= 1.2 && depth >= 0.35) return "large beak";
+      if (length >= 0.85) return "thin curved beak";
+      if (depth >= 0.55) return "tall colourful beak";
+      return "hooked beak";
     }
-    if (w > 0.16) return "large beak";
-    if (w > 0.12) return "thin curved beak";
-    if (h > 0.12 && h >= w * 1.5) return "tall colourful beak";
-    if (h > 0.1) return "curved beak";
-    if (w <= 0.042) return "small hooked beak";
-    return "hooked beak";
+    if (length >= 1.2 && depth >= 0.35) return "large beak";
+    if (length >= 1.6) return "long pointed beak";
+    if (ratio >= 4 && length <= 1.05) return "flat beak";
+    if (length >= 0.75) return "pointed beak";
+    if (length < 0.65) return "short beak";
+    return undefined;
   })();
   // Handlebars classify the same way: a drop curl wins, then a wide swept bar,
   // then a plain bar. Only one bar check can pass per drawing. The zone sits in
   // the front half of the bicycle and below the bird's head, so neck strokes and
   // leg strokes cannot read as bars.
-  const barItems = wheels ? stroked.filter((item) => barZone(item) && item.bounds.minX > wheels[0].cx + (wheels[1].cx - wheels[0].cx) * 0.5 && item.bounds.minY > canvas.minY + height * 0.4) : [];
+  const barItems = wheels ? stroked.filter((item) => barZone(item) && item.bounds.minX > wheels[0].cx + wheelbase * 0.5 && item.bounds.minY > extent.minY + height * 0.4) : [];
   const barStyle = barItems.some((item) => item.element.curved && span(item.bounds).h > span(item.bounds).w)
     ? "drop handlebars"
     : barItems.some((item) => item.element.curved && span(item.bounds).w > width * 0.07)
       ? "swept handlebars"
       : barItems.length > 0 ? "handlebars" : undefined;
-  // Legs are drawn strokes under the body; wheels, tails, frame members and
-  // cargo boxes do not count. A tail sweeps well left of the body, the frame
-  // spans the wheels, and a box sits ahead of it.
-  const legStrokes = stroked.filter((item) => (item.element.name === "path" || item.element.name === "line" || item.element.name === "polyline") && item.bounds.minY > canvas.minY + height * 0.35 && item.bounds.maxY > item.bounds.minY + height * 0.1 && item.bounds.minY < (body ? body.bounds.maxY + height * 0.06 : canvas.minY + height * 0.7) && (!body || (item.bounds.minX > body.bounds.minX - width * 0.05 && item.bounds.maxX <= body.bounds.maxX + width * 0.1)));
+  // Legs are drawn strokes hanging from inside the body toward the pedals;
+  // wheels, tails, frame members and cargo boxes do not count. A tail sweeps
+  // well left of the body, the frame spans the wheels, and a box sits ahead.
+  const legStrokes = stroked.filter((item) => (item.element.name === "path" || item.element.name === "line" || item.element.name === "polyline") && item.bounds.minY > (body ? body.bounds.minY + body.ry * 0.2 : extent.minY + height * 0.35) && item.bounds.maxY > item.bounds.minY + height * 0.1 && item.bounds.minY < (body ? body.bounds.maxY + height * 0.06 : extent.minY + height * 0.7) && (!body || (item.bounds.minX > body.bounds.minX - width * 0.05 && item.bounds.maxX <= body.bounds.maxX + width * 0.1)));
+
+  // A leg is long when a thin stroke spans clearly more than the gap between
+  // the body's underside and the wheel line: it starts visibly inside the
+  // body, the way a wading bird's legs do.
+  const legGap = wheels && body ? wheels[0].cy - body.bounds.maxY : 0;
+  const longLeg = legStrokes.some((item) => {
+    const h = span(item.bounds).h;
+    const strokeWidth = number(item.element.paint["stroke-width"]) ?? h * 0.5;
+    return strokeWidth <= h * 0.15 && legGap > 0 && h >= legGap * 1.25;
+  });
 
   const knobby = Boolean(wheels && (wheelThickness(wheels![0]) || wheelThickness(wheels![1])));
   // A neck is a stroke bridging body to head that starts behind the head, so a
   // pouch or beak hanging ahead of the head cannot count.
-  const neckStroke = body && head && stroked.find((item) => item.bounds !== head.bounds && item.bounds !== body.bounds && span(item.bounds).h > height * 0.1 && span(item.bounds).w < width * 0.35 && item.bounds.minX < head.cx && item.bounds.minY <= head.bounds.maxY + height * 0.05 && item.bounds.maxY >= body.bounds.minY - height * 0.05 && item.bounds.minY < body.bounds.minY);
+  const neckStroke = body && head && stroked.find((item) => item.bounds !== head.bounds && item.bounds !== body.bounds && span(item.bounds).h > body.ry * 0.4 && span(item.bounds).w < wheelbase * 0.6 && item.bounds.minX < head.cx && item.bounds.minY <= head.bounds.maxY + height * 0.05 && item.bounds.maxY >= body.bounds.minY - height * 0.05 && item.bounds.minY < body.bounds.minY);
   const checks: Record<string, boolean> = {
     "two wheels": Boolean(wheels),
-    "bicycle frame": Boolean(wheels && stroked.some((item) => between(item) && span(item.bounds).w > (wheels![1].cx - wheels![0].cx) * 0.4 && item.bounds.minY < scene.frameTop)),
+    "bicycle frame": Boolean(wheels && stroked.some((item) => between(item) && span(item.bounds).w > wheelbase * 0.4 && item.bounds.minY < scene.frameTop)),
     "handlebars": barItems.length > 0,
-    "pedals": Boolean(wheels && rounds.some((round) => round.rx < wheels![0].rx * 0.4 && round.rx > width * 0.008 && round.cx > wheels![0].cx && round.cx < wheels![1].cx && round.cy < wheels![0].cy && round.cy > wheels![0].cy - height * 0.25)),
+    "pedals": Boolean(wheels && rounds.some((round) => round.rx < wheels![0].rx * 0.4 && round.rx > width * 0.006 && round.cx > wheels![0].cx && round.cx < wheels![1].cx && round.cy < wheels![0].cy && round.cy > wheels![0].cy - height * 0.25)),
     "bird body": Boolean(body),
     "bird head": Boolean(head),
     "beak": beaks.length > 0,
@@ -265,47 +361,46 @@ function sceneChecks(scene: Scene) {
     "short neck": Boolean(body && head && !neckStroke && head.bounds.maxY >= body.bounds.minY - height * 0.02),
     "upright body": Boolean(body && body.ry >= body.rx * 0.9),
     "level body": Boolean(body && body.ry < body.rx * 0.9),
-    "long legs": legStrokes.some((item) => Number(item.element.attrs["stroke-width"] ?? 99) <= 9 && span(item.bounds).h > height * 0.12) || legStrokes.some((item) => span(item.bounds).h > height * 0.27),
-    "tail feathers": Boolean(body && geometry.some((item) => item.element.attrs.fill && item.element.attrs.fill !== "none" && item.bounds.maxX < body.bounds.minX + width * 0.06 && span(item.bounds).w > width * 0.04 && span(item.bounds).h > height * 0.05 && item.bounds.minY > body.bounds.minY && item.bounds.minY <= body.bounds.maxY)),
+    "long legs": longLeg,
+    "tail feathers": Boolean(body && geometry.some((item) => item.element.paint.fill !== "none" && item.bounds.maxX < body.bounds.minX + width * 0.06 && span(item.bounds).w > width * 0.04 && span(item.bounds).h > height * 0.05 && item.bounds.minY > body.bounds.minY && item.bounds.minY <= body.bounds.maxY)),
     // Beak styles are exclusive: one drawing has exactly one beak shape.
     "pouch beak": beakStyle === "pouch beak",
-    "curved beak": beakStyle === "curved beak",
     "large beak": beakStyle === "large beak",
     "long pointed beak": beakStyle === "long pointed beak",
-    "flat beak": beakStyle === "flat beak",
-    "orange beak": beakStyle === "orange beak",
-    "hooked beak": beakStyle === "hooked beak",
-    "short beak": beakStyle === "short beak",
-    "small hooked beak": beakStyle === "small hooked beak",
-    "thin curved beak": beakStyle === "thin curved beak",
-    "tall colourful beak": beakStyle === "tall colourful beak",
     "pointed beak": beakStyle === "pointed beak",
+    "flat beak": beakStyle === "flat beak",
+    "thin curved beak": beakStyle === "thin curved beak",
+    "hooked beak": beakStyle === "hooked beak",
+    "tall colourful beak": beakStyle === "tall colourful beak",
+    "short beak": beakStyle === "short beak",
     // Task-specific bicycle parts: the named vehicle's own cues.
     "drop handlebars": barStyle === "drop handlebars",
     "swept handlebars": barStyle === "swept handlebars",
-    "small wheels": Boolean(wheels && wheels[0].rx < width * 0.08 && wheels[1].rx < width * 0.08),
-    "full-size wheels": Boolean(wheels && wheels[0].rx >= width * 0.08 && wheels[1].rx >= width * 0.08),
-    "long wheelbase": Boolean(wheels && wheels[1].cx - wheels[0].cx > width * 0.6),
-    "standard wheelbase": Boolean(wheels && wheels[1].cx - wheels[0].cx <= width * 0.6),
+    "small wheels": Boolean(wheels && wheels[0].rx < width * 0.075 && wheels[1].rx < width * 0.075),
+    "full-size wheels": Boolean(wheels && wheels[0].rx >= width * 0.075 && wheels[1].rx >= width * 0.075),
+    "long wheelbase": Boolean(wheels && wheelbase > width * 0.6),
+    "standard wheelbase": Boolean(wheels && wheelbase <= width * 0.6),
     "knobby tires": knobby,
     "smooth tires": Boolean(wheels) && !knobby,
     "fat tires": Boolean(wheels && (fatTires(wheels![0]) || fatTires(wheels![1]))),
     "second saddle": Boolean(wheels && rounds.filter((round) => round.rx > width * 0.012 && round.rx < width * 0.05 && round.ry < round.rx * 0.6 && round.cx > wheels![0].cx && round.cx < wheels![1].cx && round.cy > wheels![0].cy - height * 0.3 && round.cy < wheels![0].cy - height * 0.12).length >= 2),
-    "cargo box": Boolean(wheels && geometry.some((item) => (item.element.name === "rect" || item.element.name === "polygon") && item.element.attrs.fill && item.element.attrs.fill !== "none" && span(item.bounds).w > width * 0.08 && span(item.bounds).h > height * 0.08 && item.bounds.minY < wheels![0].cy - height * 0.05 && item.bounds.minY > wheels![0].cy - height * 0.55 && overlap(item.bounds, { minX: wheels![0].cx - width * 0.08, minY: canvas.minY, maxX: wheels![1].cx + width * 0.12, maxY: canvas.maxY }))),
+    "cargo box": Boolean(wheels && geometry.some((item) => (item.element.name === "rect" || item.element.name === "polygon") && item.element.paint.fill !== "none" && span(item.bounds).w > width * 0.08 && span(item.bounds).h > height * 0.1 && item.bounds.minY < wheels![0].cy - height * 0.05 && item.bounds.minY > wheels![0].cy - height * 0.55 && overlap(item.bounds, { minX: wheels![0].cx - width * 0.08, minY: extent.minY, maxX: wheels![1].cx + width * 0.12, maxY: extent.maxY }))),
     "rear rack": Boolean(wheels && geometry.some((item) => item.element.name === "rect" && span(item.bounds).w > width * 0.07 && span(item.bounds).h < height * 0.06 && item.bounds.maxX < wheels![0].cx + wheels![0].rx + width * 0.06 && item.bounds.minY > wheels![0].bounds.minY - height * 0.12 && item.bounds.maxY < wheels![0].cy)),
-    "battery pack": Boolean(wheels && geometry.some((item) => item.element.name === "rect" && item.element.attrs.fill !== "none" && item.element.attrs.fill !== undefined && span(item.bounds).w > width * 0.06 && span(item.bounds).h > height * 0.03 && item.bounds.minX > wheels![0].cx && item.bounds.maxX < wheels![1].cx && item.bounds.maxY < wheels![0].cy && item.bounds.minY > canvas.minY + height * 0.25)),
+    "battery pack": Boolean(wheels && geometry.some((item) => item.element.name === "rect" && item.element.paint.fill !== "none" && span(item.bounds).w > width * 0.06 && span(item.bounds).h > height * 0.03 && item.bounds.minX > wheels![0].cx && item.bounds.maxX < wheels![1].cx && item.bounds.maxY < wheels![0].cy && item.bounds.minY > extent.minY + height * 0.25)),
   };
   function wheelThickness(wheel: Round) {
-    const strokeWidth = Number(wheel.element.attrs["stroke-width"] ?? 0);
-    // The absolute floor keeps a normal tire on a small wheel from reading as
-    // knobby: 10 px of tread on a 44 px wheel is not a mountain-bike tire.
-    return (strokeWidth >= wheel.rx * 0.22 && strokeWidth >= 12) || rounds.some((round) => round !== wheel && Math.abs(round.cx - wheel.cx) < wheel.rx * 0.15 && Math.abs(round.cy - wheel.cy) < wheel.rx * 0.15 && round.rx > wheel.rx && round.rx < wheel.rx * 1.3);
+    const strokeWidth = number(wheel.element.paint["stroke-width"]) ?? 0;
+    // Knobby tread shows as a thick tyre wall, a dashed tread line, or a
+    // concentric outer ring hugging the rim.
+    return strokeWidth >= wheel.rx * 0.28
+      || (wheel.element.paint["stroke-dasharray"] !== undefined && wheel.element.paint["stroke-dasharray"] !== "none")
+      || rounds.some((round) => round !== wheel && Math.abs(round.cx - wheel.cx) < wheel.rx * 0.15 && Math.abs(round.cy - wheel.cy) < wheel.rx * 0.15 && round.rx > wheel.rx && round.rx < wheel.rx * 1.3);
   }
   function fatTires(wheel: Round) {
-    const strokeWidth = Number(wheel.element.attrs["stroke-width"] ?? 0);
-    return strokeWidth >= wheel.rx * 0.26 && strokeWidth >= 18;
+    const strokeWidth = number(wheel.element.paint["stroke-width"]) ?? 0;
+    return strokeWidth >= wheel.rx * 0.33;
   }
-  return { checks, bodies, head, beaks };
+  return { checks, head, beaks };
 }
 
 // Shared checks form the structural gate; every task asks for all of them.
@@ -320,8 +415,8 @@ const BASE_CHECKS: Array<[string, number]> = [["svg canvas", 0.05], ["complexity
 const MISS_FACTOR = 0.4;
 const SPECIFIC_CHECKS = new Set([
   "long neck", "short neck", "upright body", "level body", "long legs", "tail feathers",
-  "pouch beak", "curved beak", "large beak", "long pointed beak", "flat beak", "orange beak",
-  "hooked beak", "short beak", "small hooked beak", "thin curved beak", "tall colourful beak", "pointed beak",
+  "pouch beak", "large beak", "long pointed beak", "pointed beak", "flat beak",
+  "thin curved beak", "hooked beak", "tall colourful beak", "short beak",
   "drop handlebars", "swept handlebars", "small wheels", "full-size wheels", "long wheelbase", "standard wheelbase",
   "knobby tires", "smooth tires", "fat tires", "second saddle", "cargo box", "rear rack", "battery pack",
 ]);
@@ -349,10 +444,8 @@ export function gradeSvg(answer: unknown, task?: Task): TaskScore {
     rows.push({ name: part, weight: kind === "gate" ? SHARED_WEIGHTS[part]! : 1, passed, kind });
   }
   // Shared base rows ride along in the gate as well.
-  const useful = geometry.filter((item) => !(item.element.name === "rect" && span(item.bounds).w > width * 0.9 && span(item.bounds).h > height * 0.9));
-  const extent = useful.length ? useful.reduce((all, item) => ({ minX: Math.min(all.minX, item.bounds.minX), minY: Math.min(all.minY, item.bounds.minY), maxX: Math.max(all.maxX, item.bounds.maxX), maxY: Math.max(all.maxY, item.bounds.maxY) }), useful[0]!.bounds) : undefined;
   for (const [name, weight] of BASE_CHECKS) {
-    const passed = name === "svg canvas" ? true : name === "complexity" ? geometry.length >= 12 && geometry.length <= 200 : Boolean(extent && extent.maxX - extent.minX > width * 0.5 && extent.maxY - extent.minY > height * 0.5);
+    const passed = name === "svg canvas" ? true : name === "complexity" ? geometry.length >= 12 && geometry.length <= 200 : Boolean(width > 0 && height > 0 && width >= height * 0.8 && height >= width * 0.2);
     rows.push({ name, weight, passed, kind: "gate" });
   }
   // Unrequested task-specific parts that were drawn anyway count against fit.

@@ -1,5 +1,7 @@
 # benchmark-pelican
 
+Paper: [10.5281/zenodo.23752417](https://doi.org/10.5281/zenodo.23752417)
+
 [![npm](https://img.shields.io/npm/v/benchmark-pelican)](https://www.npmjs.com/package/benchmark-pelican) [![downloads](https://img.shields.io/npm/dm/benchmark-pelican)](https://www.npmjs.com/package/benchmark-pelican) [![license](https://img.shields.io/npm/l/benchmark-pelican)](./LICENSE) [![types](https://img.shields.io/badge/TypeScript-types-3178c6)](#sdk)
 
 [AI Benchmark Index](https://private-repo-337e.com/benchmarks/benchmark-pelican) · [npm](https://www.npmjs.com/package/benchmark-pelican) · [Grading](./docs/grading.md) · [MCP](#model-context-protocol) · [HTTP API](#http-api)

@@ -1,0 +1,44 @@
+{
+  "source_commit": "1b38e1e82bae9cf9508ad030657de8fe88c5c512",
+  "prereg_commit": "c30172b5eff341f44b781927619e9f662e42e493",
+  "node": "v26.12.1",
+  "files": {
+    "src/svg-grader.ts": "025df152690d2b019d349afa7b287ba1776dcf501007ee25240f3dce9d88b8f9",
+    "data/tasks.jsonl": "f9b53d823a57f1a631f4501c141289ffc814fbfdd74020a25fb298a3600b7ef5",
+    "scripts/literal-policy.mjs": "5b3738e535d4a5d0e0323c74e08d6c6e5e8ef64f62ba66e7ae8cd7ec3fa8660a",
+    "package-lock.json": "83c74d1cc1a72a511ff88fe42777015789c4ecabee48f1cbd67f7cc63c7b119a",
+    "paper/PREREG.md": "827ecc3cb09fb56a6d425de23dea450705b6ba6ba30a111a749037547411193e",
+    "paper/config.json": "5408ad512aa3dcdfe1c58d525fdc5e60cbe9a95bb71673bda407f35bac6a828c",
+    "paper/scripts/run.mjs": "f5fb94cc0b6de6e796fb79268bae8adc91d156ee1e56ec622414a406f0d4885f"
+  },
+  "semantic_hashes": [
+    {
+      "policy": "empty",
+      "firstHash": "e1575f158092ac7e273829157f56c24435f7734ea022599f1c884fb04fafb7ff"
+    },
+    {
+      "policy": "constant",
+      "firstHash": "a2eed03685d8b418474b185defb1106e054e6b328db849e43235f5d6335dbd95"
+    },
+    {
+      "policy": "echo",
+      "firstHash": "24e8fa702e506c938e2faf3facf950a2c4f70590fe1636e09e80e35441df19d6"
+    },
+    {
+      "policy": "refusal",
+      "firstHash": "fb6f3459985a6c4b08e118d07277a512591e4779faf7e7674f53bf5903e8a392"
+    },
+    {
+      "policy": "canonical",
+      "firstHash": "3a7a0b681caff6f3855119cfa8236da9118fb692d9581c1533953ecc668426aa"
+    },
+    {
+      "policy": "reference",
+      "firstHash": "776dc4bed94fbdc3d62fc39e10d2aa107c892eb4b68121f4845b082707b72690"
+    },
+    {
+      "policy": "literal",
+      "firstHash": "c3238f3fbdfdc2c93e2d159c7667283d0ff9c1c11f151c213c7b1e9ee8c81eff"
+    }
+  ]
+}

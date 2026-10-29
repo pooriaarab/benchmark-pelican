@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "title": "Pelican: Measuring Structural Compliance in SVG Drawings",
+  "abstract": "SVG drawing tasks combine markup, geometry, and instruction following. Pelican measures structural compliance with explicit bird and bicycle constraints. We evaluate 30 public tasks using scripted controls, paired reference replay, and a simulated population with drawing-part deletion. The prompt-only builder policy obtains a mean structural score of 1.000 [1.000, 1.000]. Mismatched references obtain 0.024 [0.020, 0.028]. Intervals are 95 percent task bootstrap intervals. A simulated restoration control bounds the loss caused by deletion; it is not an implemented repair agent. The evidence concerns the scorer and these policies, not learned-model ability or visual quality. No human ratings or learned-model results are reported.",
+  "authors": [
+    {
+      "name": "Pooria Arab",
+      "affiliation": "Independent researcher",
+      "orcid": "https://orcid.org/0009-0005-9964-6841"
+    }
+  ],
+  "license": "CC-BY-4.0",
+  "keywords": [
+    "SVG",
+    "spatial reasoning",
+    "structural grading",
+    "benchmark validity",
+    "simulated agents"
+  ],
+  "code_url": "https://github.com/pooriaarab/benchmark-pelican",
+  "artifact_name": "pelican-paper.pdf"
+}

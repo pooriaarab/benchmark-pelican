@@ -1,0 +1,6 @@
+\begin{figure}[ht]\centering
+\begin{tikzpicture}\begin{axis}[ymin=0,ymax=1.08,xlabel={Simulated deletion probability},ylabel={Simulated mean score},legend pos=south west]
+\addplot+[error bars/.cd,y dir=both,y explicit] table[x=p,y=mean,y error minus=low,y error plus=high,col sep=comma]{figures/population.generated.csv};\addlegendentry{Simulated deletion}
+\addplot[okorange,dashed] table[x=p,y=restored,col sep=comma]{figures/population.generated.csv};\addlegendentry{Simulated restoration}
+\end{axis}\end{tikzpicture}
+\caption{Simulated deletion reduces structural scores. Intervals resample simulated agents, retaining their tasks. Restoration returns the original drawing and defines an artificial upper bound.}\end{figure}

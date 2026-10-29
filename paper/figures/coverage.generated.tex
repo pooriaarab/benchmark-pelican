@@ -1,0 +1,5 @@
+\begin{figure}[ht]\centering
+\begin{tikzpicture}\begin{axis}[ybar,ymin=0,ylabel={Task count},xtick={0,1,2,3,4,5,6,7,8,9},xticklabels={pelican,penguin,duck,stork,goose,flamingo,heron,parrot,swan,toucan},x tick label style={rotate=35,anchor=east}]
+\addplot[fill=okblue] table[x=x,y=count,col sep=comma]{figures/coverage.generated.csv};
+\end{axis}\end{tikzpicture}
+\caption{Public coverage by animal. Counts describe the fixed task set, not a sampled population. Each task also names a vehicle and explicit part constraints.}\end{figure}

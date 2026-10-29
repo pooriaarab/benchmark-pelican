@@ -1,0 +1,5 @@
+\begin{figure}[ht]\centering
+\begin{tikzpicture}\begin{axis}[view={0}{90},width=.75\linewidth,height=6cm,xlabel={Source reference index},ylabel={Target task index},colorbar,point meta min=0,point meta max=1,colormap/viridis]
+\addplot[scatter,only marks,mark=square*,mark size=2.5pt,scatter src=explicit] table[x=source,y=target,meta=score,col sep=comma]{figures/cross.generated.csv};
+\end{axis}\end{tikzpicture}
+\caption{Reference transfer is strongest on the diagonal. Off-diagonal cells use the target task requirements. Indices follow the released task order; the scale is structural score.}\end{figure}

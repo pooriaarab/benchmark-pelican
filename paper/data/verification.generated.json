@@ -1,0 +1,10 @@
+{
+  "replayedRows": 4110,
+  "repeatedPolicies": 7,
+  "summaryMatches": true,
+  "sourceHashesMatch": true,
+  "metadataMatches": true,
+  "pages": 9,
+  "pdfTextChecks": true,
+  "pdfSha256": "7879734d9be7e9378600a7ee6ecf75bd90de66f6ec70bda92bb78b549585ef6a"
+}

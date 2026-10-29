@@ -1,0 +1,148 @@
+\documentclass{article}
+\input{template/layout.tex}
+\input{generated/macros.generated.tex}
+\title{\paperTitle}
+\author{Pooria Arab\\Independent researcher\\\href{https://orcid.org/\authorOrcid}{ORCID \authorOrcid}}
+\begin{document}
+\maketitle
+\begin{abstract}\paperAbstract\end{abstract}
+\section{Why this matters}
+A drawing request can be easy to understand and hard to evaluate. A bird riding a bicycle combines object parts, spatial relations, and an output format. A response can contain valid markup yet omit the rider. It can contain the right objects yet place them in unrelated regions. It can also draw a convincing scene with geometry that a narrow checker cannot recognize. These outcomes call for different explanations.
+
+Pelican defines a restricted measurement problem: structural compliance with explicit bird and bicycle constraints in SVG. The benchmark asks whether a drawing contains measurable geometric evidence for the requested parts and relations. It does not decide whether an image is beautiful, whether a viewer recognizes the species, or whether a model understands physical riding. This distinction sets the boundary of every result below.
+
+The familiar pelican prompt motivates the task, but a single memorable picture gives weak evidence of instruction following. A policy could return that picture for every request. Pelican therefore varies the animal, vehicle, and required parts. Task-specific constraints make that fixed-picture strategy measurable. The key comparison holds an output constant while changing the task against which it is judged.
+
+The scientific contribution is a compact, inspectable measurement design and a bounded validation study. We test simple controls, compare matched and mismatched references, and run a simulated population with missing drawing parts. We report the primary continuous score alongside a thresholded success measure. The extra simulated experiment tests score sensitivity under a known intervention. It does not estimate how often a deployed model makes those errors.
+
+\section{Related work}
+Executable evaluation provides a useful precedent. HumanEval evaluates program generation through functional tests \citep{chen}. Drawing evaluation needs a different outcome contract: executable markup alone does not establish that the requested scene is present. Pelican checks specified geometry after parsing, rather than equating syntactic validity with task completion.
+
+BetterBench frames benchmark quality across design, implementation, documentation, and maintenance \citep{reuel}. Its emphasis on reproducibility motivates the controls and released outputs here. Construct-validity work asks whether operational measures support claims about the intended phenomenon \citep{bean}. We address that question by defining structural compliance narrowly and separating it from perception and aesthetics.
+
+Statistical guidance for evaluation distinguishes an observed task set from a hypothetical population of tasks \citep{miller}. Our intervals make that distinction explicit. They describe variation under stated resampling assumptions. They do not make this small, deliberately constructed set representative of all drawing requests. Prospective planning in NLP also motivates recording hypotheses and exclusions before measurement \citep{prereg}. Our plan is a versioned local record, not an independently deposited registration.
+
+SVG is a broad graphics language with features beyond the subset that this structural checker can interpret \citep{svg}. A benchmark may legitimately restrict its accepted representation, but must disclose that restriction. A failure on unsupported geometry is not proof that the rendered picture is wrong. These representation limits are central to the caveats, rather than minor formatting details.
+
+\section{Experiment design}
+\subsection{Construct and observable evidence}
+The unit of evaluation is a task paired with a submitted SVG answer. A task specifies an animal, a vehicle, and required geometric parts. The observable evidence consists of parsed elements, paint properties, estimated bounds, and relations among those bounds. The grader uses these observations to identify a shared bird-and-bicycle structure and then checks the parts that distinguish the task.
+
+Wheel geometry supplies a local coordinate frame. The wheel radius and wheelbase give scale; the axle line gives a vertical reference. A frame connects the wheel regions. Bird body and head checks locate substantial round forms above that frame. Beak and limb checks add evidence for a rider. This design reduces dependence on arbitrary canvas dimensions, but it remains a geometric heuristic.
+
+A warm filled shape near a head can support a beak check. That evidence does not establish biological identity. Likewise, a frame spanning wheel centres supports a bicycle check but does not prove mechanical plausibility. The intended construct is therefore narrower than general spatial reasoning. Results should be reported as structural scores, with failure reasons available for inspection.
+
+\subsection{Controls and access boundaries}
+The negative controls return an empty string, a constant acknowledgement, the prompt itself, or a refusal. They test whether text that does not draw the scene earns credit. Echoing is useful because the prompt names the required parts. A successful echo attack would expose reliance on labels rather than geometry. These controls are deliberately weak; they do not represent capable adversarial search.
+
+The canonical control returns the same released pelican drawing for every task. This is a stronger task-blind control because the output contains a complete scene. The reference control returns each task's own expected drawing. It has privileged access and serves as a positive control. Its success cannot support claims about generalization.
+
+The literal policy reads only the prompt and constructs an SVG from its stated constraints. It does not read the expected drawing or hidden task fields. However, the benchmark builder wrote this policy with knowledge of the task language and grader. Its success shows that one prompt-conditioned construction can reach the ceiling. It is neither an independent implementation nor a learned agent.
+
+Each control runs twice with unchanged inputs. The second run checks reproducibility of submissions, scores, and check details. It does not add independent evidence about task coverage. All scored responses are retained, including empty and malformed answers. An execution error would stop the study rather than disappear from the denominator.
+
+\subsection{Matched reference replay}
+We score every released reference against every released task. The diagonal holds the intended reference-task pairing. Off-diagonal cells hold the reference constant while substituting another target task. This produces a direct test of task specificity: a complete but mismatched scene should lose credit for missing or unrequested features.
+
+This design differs from a matched trap-and-lookalike benchmark. There is no hazardous action and no binary choice between acting and refusing. The match is between a geometric submission and a task specification. Nor do the off-diagonal pairs isolate a single feature: animal and vehicle constraints can change together. We therefore interpret the transfer matrix as a specificity diagnostic, not a causal estimate for each part.
+
+\section{Coverage}
+The frozen public set contains \taskCount{} tasks, spanning \animalCount{} animal labels and \vehicleCount{} vehicle labels. The coverage figure describes the animal distribution. Tasks combine a canonical drawing request with seeded variations. The full set is evaluated without sampling. These counts describe the released inventory; they are not estimates and require no sampling intervals.
+
+\input{figures/coverage.generated.tex}
+Part requirements provide finer coverage than animal names alone. Beaks vary in shape, relative size, and curvature. Bodies vary in posture and neck configuration. Vehicles vary in wheel size, tires, handlebar shape, and accessories. Those parts are explicit in the prompt, so a policy can reason about the scoring contract without recovering it from hidden examples.
+
+For example, the canonical task asks for a pouch beak, a short neck, and a level body. Its vehicle asks for full-size wheels and smooth tires. A task with a different beak or an added carrier requires different geometry. Replaying the canonical drawing therefore preserves general scene structure while violating particular requirements. This makes the fixed drawing control more informative than a response containing no SVG.
+
+Coverage remains sparse and dependent. Tasks share generation conventions, part definitions, and scoring logic. Animal labels do not define independent natural categories for statistical sampling. A high score across these tasks can reflect mastery of the task grammar. It does not establish transfer to arbitrary species, unseen vehicle types, or open-ended illustration briefs.
+
+The public prompts and references are available before evaluation. This enables inspection but also permits memorization. We make no contamination-free claim. A future study should distinguish memorized references, prompt-conditioned synthesis, and transfer to independently designed tasks. Merely changing a random seed would not remove shared conventions or design assumptions.
+
+\section{Taxonomy of failure types}
+\paragraph{Format and safety failures.} Empty text, malformed markup, or prohibited active content can fail before geometry is evaluated. These failures concern the submission contract. They should not be described as missing-object errors. Restricting active content also does not establish a complete browser security boundary; the present study does not audit a renderer.
+\paragraph{Shared scene failures.} A drawing can parse while lacking wheel evidence, a connecting frame, a body, or a beak. Such failures undermine the common scene across tasks. Shape presence alone is insufficient: the checks use placement and relative size. A small circle at an unrelated location should not count as a wheel merely because its element type matches.
+\paragraph{Task-fit failures.} A structurally complete drawing can have the wrong beak, posture, tire class, or accessory. The grader penalizes both missing required parts and detected unrequested parts. This discourages a universal picture that draws every available feature. It also creates a risk: an incidental shape may be classified as an unwanted accessory.
+\paragraph{Representation failures.} A valid rendered drawing can rely on transforms, nested viewports, or complex paths that the checker does not fully interpret. Such failures are false negatives relative to visual intent, even when they follow the operational scoring contract. The benchmark should preserve them as a separate explanation rather than attribute them to deficient drawing ability.
+\paragraph{Measurement failures.} Bounding boxes approximate occupied geometry. Empty regions inside a box can create apparent contacts. A shape can then enter the connected figure or change an inferred body. Threshold wording can also differ from the exact implemented boundary. These risks motivate independent visual checks and targeted boundary studies. The present deletion experiment does not resolve them.
+\section{Metrics and scoring}
+\subsection{Structural score}
+Let $G$ denote the weighted shared-scene score, $m$ the number of missed task-specific parts, and $u$ the number of detected unrequested parts. The task-fit multiplier is $\alpha^{m+u}$. Before the final caps and rounding, the structural score is
+
+\begin{equation} S^{*}=G\alpha^{m+u}. \end{equation}
+The penalty factor is $\alpha=\penaltyFactor{}$. The fixed penalty factor and shared-check weights belong to the scoring definition, not estimated model performance. Unsafe or malformed submissions receive zero. Additional caps limit scores when bicycle or bird evidence is absent. The released scorer rounds its final score. All analyses below consume that returned score rather than a reconstructed continuous approximation.
+
+The product has an important interpretation. Shared structure cannot compensate freely for task mismatch. Conversely, a low final score can arise from several distinct causes. Missing a key object, drawing the wrong variant, and triggering a parser restriction should not be treated as equivalent errors merely because their scalar scores coincide. We retain component checks and explanations to support that distinction.
+
+\subsection{Means, success, and uncertainty}
+The primary endpoint is mean structural score over the fixed task set. The secondary endpoint is the fraction of task scores at least $0.8$, selected in the study plan. This threshold is a reporting convention, not a calibrated probability of visual correctness. It can hide differences among poor drawings, which is why the continuous endpoint remains primary.
+
+Control means use percentile bootstrap intervals over tasks. Success proportions use Wilson intervals. All intervals have nominal $95\%$ coverage under their respective sampling assumptions. The bootstrap uses \bootDraws{} draws with seed \bootSeed{}. At a constant boundary, its interval collapses. Wilson intervals remain non-degenerate and make clear that observing every task pass does not prove universal success.
+
+For reference transfer, each target task contributes its mean across mismatched source references. We bootstrap those target means. The paired gain subtracts each target's mismatched mean from its own-reference score. This retains the source-reference dependence within a target. It does not model uncertainty from a newly sampled source library; the reference library is fixed.
+
+No significance test or leaderboard ranking is claimed. The intervals express uncertainty under hypothetical task resampling, despite the actual set being a census. Shared generation rules can make that hypothetical model optimistic. Reporting a narrow interval does not remove the need for broader task designs or independent validation.
+
+\section{Results}
+\subsection{Simple and task-conditioned policies}
+\begin{table}[ht]\centering\small\input{generated/controls.generated.tex}\caption{Scripted control results. Mean intervals use task bootstrap; success intervals use Wilson. Success means a returned score at least $0.8$.}\end{table}
+Empty, constant, echo, and refusal controls receive no mean credit. Echo therefore provides no evidence of a label-only shortcut in this study. This is a bounded negative result. It says nothing about a stronger adversary that draws geometry tailored to the checker.
+
+The canonical drawing obtains \canonicalMean{}, while task-specific references obtain \referenceMean{}. The literal prompt policy obtains \literalMean{}. These results support the planned separation between task-conditioned outputs and the tested task-blind controls. They also show a ceiling for the builder's policy on the released public language. That ceiling should not be described as learned-model saturation.
+
+\input{figures/controls.generated.tex}
+Reference and literal policies tie at the ceiling. We report that tie as a null contrast rather than searching for a condition that separates them. Their access boundaries still differ: one reads expected answers, while the other uses the prompt. Equal scores do not make their evidence interchangeable. The comparison establishes reachability, not an independent estimate of human or model competence.
+
+\subsection{Cross-task reference transfer}
+The mismatched mean is \crossMean{}. The paired own-reference advantage is \crossGain{}. The largest off-diagonal score is \crossMax{}. These values show that intact drawings do not generally transfer across the released requirements. The maximum is a descriptive property of the full observed matrix; it is not an estimated rate.
+
+\input{figures/cross.generated.tex}
+The strong diagonal is necessary but insufficient evidence for validity. References and checks were designed together, so agreement can be circular. The low off-diagonal values add a distinct constraint: the scorer must consult target requirements rather than award credit for any complete scene. Yet a scorer can satisfy both properties while rejecting valid alternative drawings. Independent alternatives remain essential.
+
+The fixed canonical drawing scores above the average mismatch because it includes its own matched task. It also has a particular part combination. Its mean therefore answers a different question from the off-diagonal statistic. We keep both measures: one evaluates a concrete task-blind policy; the other evaluates the released reference library under mismatching.
+
+\section{Extra virtual experiment: simulated drawing errors}
+\subsection{Simulated population and intervention}
+The simulated population contains \simAgents{} agents, indexed by consecutive integer seeds beginning at one. Each simulated agent visits the complete task set. Its starting output is the literal policy's drawing. At each planned deletion probability, every self-closing drawable element has a chance of being removed. Eligible elements include circles, ellipses, paths, rectangles, lines, polylines, and polygons.
+
+The same simulated agent uses the same random sequence across deletion probabilities. Increasing the probability therefore removes a nested set of elements for a given task. This pairing reduces unrelated Monte Carlo variation. It does not imply that geometric score must decrease on every individual drawing: removing an accidentally unwanted feature could help a heuristic score in another starting population.
+
+An element is a unit of markup, not a semantic part. A path can encode several connected strokes, while a bird may need several elements. The simulated probability therefore measures element deletion, not the chance of forgetting a named object. Differences in SVG encoding can change the effective severity. This choice makes the intervention simple to reproduce but limits its realism.
+
+The simulated restoration control returns the original uncorrupted literal drawing. It represents perfect access to the intended construction. It has no diagnosis, planning, or repair cost. Its gain is a mathematical upper bound for this intervention, not evidence that a practical control layer could recover the lost structure.
+
+\subsection{Simulated outcomes}
+\begin{table}[ht]\centering\small\input{generated/population.generated.tex}\caption{Simulated population sweep. Intervals resample simulated agents with all their tasks retained. Gains are paired within each simulated agent.}\end{table}
+\input{figures/population.generated.tex}
+Mean structural scores fall across the planned simulated deletion conditions. The zero-deletion condition ties its simulated restoration control, as expected. This is the planned null baseline. At higher deletion probabilities, the simulated restoration gain measures the loss from damaged output relative to the same starting construction.
+
+The curve shows sensitivity, not calibration. A marked score drop can reflect removal of a wheel or head that anchors many downstream checks. It can also reflect multiplicative task-fit penalties. The experiment changes geometry while leaving the task fixed, so it supports the claim that the score reacts to missing drawing elements. It cannot identify which psychological process would cause that failure in a language model.
+
+Intervals here resample simulated agents, not individual task-agent rows. Each agent contributes its mean over the same tasks. This preserves within-agent dependence and states the source of randomness honestly. It does not include uncertainty about task design, error distribution, or the literal policy. Changing those choices could change the whole curve.
+
+The simulated restoration line remains at the starting policy's score by construction. It should never appear in a model leaderboard. Its role is to define the intervention's recoverable loss under perfect information. A useful next experiment would replace that privileged operation with a budgeted repair procedure and score its final output without access to the original.
+
+\section{Roadmap}
+The first priority is independent drawing evidence. A new collection should include alternative SVG encodings and human-judged scenes, with ratings collected without exposing structural scores. Reviewers should distinguish species recognition, riding relations, and visual quality. Those ratings would test whether structural success predicts a useful external outcome rather than merely reproducing the checker.
+
+The next priority is representation coverage. Equivalent pictures should be expressed with separate primitives, combined paths, transforms, and nested groups. A paired study could hold rendered appearance fixed while varying representation. Disagreement would locate parser and geometry limits. This would test a different hypothesis from deleting content, and should have its own prospective plan.
+
+Task extension should focus on new relations and constructions, not only new animal names. Changes to occlusion, orientation, or attachment can reveal shortcuts that a shared drawing grammar hides. Hidden evaluation should use independently designed tasks where possible. Public development tasks can remain available for debugging without being treated as clean generalization evidence.
+
+Finally, learned-model experiments need a separate access and cost protocol. They should retain exact outputs, report generation settings, and distinguish provider failures from scored answers. No such results are included here. Free hosted inference is not configured or probed for this study; its current availability is unknown. The present packet remains useful as a reproducible baseline for later evaluation.
+
+\section{Caveats}
+\paragraph{No perceptual ground truth.} We collect no human ratings and make no claim about artistic quality. Structural checks may accept a strange-looking image or reject a recognizable one. The scores should support diagnosis within the declared contract, not stand alone as a measure of visual intelligence.
+\paragraph{Builder dependence.} References, tasks, and the literal policy share knowledge of the benchmark design. Their ceiling is expected under that dependence. Repeated runs establish reproducibility but cannot remove design bias. The study has no independent solver, rater agreement estimate, or external registration.
+\paragraph{Approximate geometry.} Bounding-box contact can connect visually separate objects through empty space. Arc bounds are approximate. Some transforms and nested viewports can lose credit. Wording near geometric thresholds can also be less exact than the scorer. These known limits motivate narrow claims and should remain visible when results are reused.
+\paragraph{Restricted controls.} Text-only controls and reference replay do not exhaust the attack space. The simulated population uses one failure mechanism and one starting policy. It excludes spurious additions, semantic substitution, layout drift, and repair loops. The observed sensitivity cannot be extrapolated to those mechanisms without measurement.
+\paragraph{Statistical scope.} The public set is small and shares construction rules. Task bootstrap intervals use an exchangeability assumption that may not hold for broader illustration requests. Simulated-agent intervals describe only the seeded error model. Collapsed boundary intervals express no observed variation, not certainty about unseen cases.
+\paragraph{Use and maintenance.} The intended use is research on constrained drawing compliance and grader behavior. The benchmark is not suitable for consequential decisions about people or for certifying safe rendering. Future scoring changes should preserve versioned results and explain which comparisons become invalid. External replication and reports of valid rejected drawings are especially useful.
+\section{Citation and availability}
+Code, task data, raw study outputs, and the reproduction instructions are available at \url{https://github.com/pooriaarab/benchmark-pelican}. Cite the paper by its title and author, and identify the source revision used for evaluation. Paper text and generated figures use CC-BY-4.0. Existing software and task licenses remain unchanged. This draft is not a venue publication or a deposited research record.
+
+\section{Authors}
+Pooria Arab is an independent researcher and the benchmark maintainer. AI assistance supports analysis code and manuscript preparation. The author remains responsible for the claims. No human participants or external model providers contribute observations to this study.
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+\end{document}

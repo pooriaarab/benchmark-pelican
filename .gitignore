@@ -4,3 +4,8 @@ artifacts/
 hidden/
 data/*.hidden.jsonl
 *.tgz
+paper/*.pdf
+paper/*.log
+paper/*.blg
+paper/.style.zip
+paper/neurips_2026.sty
